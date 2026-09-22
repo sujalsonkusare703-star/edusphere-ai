@@ -14,7 +14,8 @@ import {
   RefreshCw,
   Search,
   AlertTriangle,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from "@/components/icons";
 import type {
   CollegeDataChangeEvent,
@@ -22,6 +23,28 @@ import type {
   CandidateCutoff
 } from "@/lib/services/college-updater/types";
 import type { AdminQueueStats, SideBySideComparison } from "@/lib/services/college-updater/approval";
+
+export interface MonitoredSourceItem {
+  id: string;
+  college_id: string;
+  source_name: string;
+  source_url: string;
+  source_type: string;
+  content_format: string;
+  check_interval_minutes?: number;
+  last_checked_at?: string | null;
+  last_successful_check_at?: string | null;
+  next_check_at?: string | null;
+  last_error?: string | null;
+  consecutive_failures: number;
+  is_active: boolean;
+  pendingEventsCount?: number;
+  colleges?: {
+    id: string;
+    name: string;
+    admission_verification_status?: string;
+  };
+}
 
 export default function AdminCollegeUpdatesPage() {
   const { user, loading, getAccessToken } = useAuth();
@@ -61,6 +84,12 @@ export default function AdminCollegeUpdatesPage() {
   const [actionInProgress, setActionInProgress] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Tab State: "events" | "sources"
+  const [activeTab, setActiveTab] = useState<"events" | "sources">("events");
+  const [sources, setSources] = useState<MonitoredSourceItem[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [schedulerRunning, setSchedulerRunning] = useState(false);
+
   // Auth verification
   const isAuthorized = user?.app_metadata?.role === "admin" || user?.user_metadata?.role === "admin";
 
@@ -96,14 +125,102 @@ export default function AdminCollegeUpdatesPage() {
     }
   }, [getAccessToken, statusFilter, signalFilter, searchTerm]);
 
+  // 1b. Fetch Monitored Sources
+  const fetchSources = useCallback(async () => {
+    setSourcesLoading(true);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/api/admin/college-sources", {
+        headers: {
+          Authorization: `Bearer ${token || "demo-admin-token"}`,
+          "x-edusphere-admin-key": "demo-admin-key"
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSources(data.sources || []);
+      }
+    } catch (err) {
+      console.warn("Could not load monitored sources:", err);
+    } finally {
+      setSourcesLoading(false);
+    }
+  }, [getAccessToken]);
+
+  // 1c. Trigger Global Scheduler Run
+  const triggerSchedulerRun = async () => {
+    setSchedulerRunning(true);
+    setActionMessage(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/api/cron/college-updates", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token || "demo-admin-token"}`,
+          "x-edusphere-admin-key": "demo-admin-key",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ batchSize: 10, forceCheckAll: true })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActionMessage({
+          type: "success",
+          text: `Scheduler run complete: ${data.summary.checkedCount} sources checked, ${data.summary.eventsCreatedCount} new events staged, ${data.summary.errorsCount} errors.`
+        });
+        fetchQueue();
+        fetchSources();
+      } else {
+        const err = await res.json();
+        setActionMessage({ type: "error", text: err.error || "Scheduler execution failed" });
+      }
+    } catch (err: unknown) {
+      setActionMessage({ type: "error", text: (err as Error)?.message || "Failed to trigger scheduler" });
+    } finally {
+      setSchedulerRunning(false);
+    }
+  };
+
+  // 1d. Trigger Single Source Check
+  const triggerSingleSourceCheck = async (sourceId: string) => {
+    setActionMessage(null);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/api/admin/college-sources", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token || "demo-admin-token"}`,
+          "x-edusphere-admin-key": "demo-admin-key",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ sourceId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActionMessage({
+          type: "success",
+          text: `Source check completed (${data.result.status}). ${data.result.eventCreated ? "New change event queued!" : "No new event created."}`
+        });
+        fetchSources();
+        fetchQueue();
+      } else {
+        const err = await res.json();
+        setActionMessage({ type: "error", text: err.error || "Single check failed" });
+      }
+    } catch (err: unknown) {
+      setActionMessage({ type: "error", text: (err as Error)?.message || "Single check failed" });
+    }
+  };
+
   useEffect(() => {
     if (!loading && isAuthorized) {
       const timer = setTimeout(() => {
         fetchQueue();
+        fetchSources();
       }, 0);
       return () => clearTimeout(timer);
     }
-  }, [loading, isAuthorized, fetchQueue]);
+  }, [loading, isAuthorized, fetchQueue, fetchSources]);
 
   // 2. Fetch Event Comparison Details
   const openEventDetails = async (eventId: string) => {
@@ -340,16 +457,59 @@ export default function AdminCollegeUpdatesPage() {
               Automated source checks stage candidate facts in this review queue. Only an explicit, authorized administrator approval can atomically apply updates to production tables.
             </p>
           </div>
-          <button
-            onClick={fetchQueue}
-            disabled={queueLoading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white text-indigo-900 text-xs font-semibold hover:bg-indigo-50 transition shadow-xs flex-shrink-0"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${queueLoading ? "animate-spin" : ""}`} />
-            <span>Refresh Queue</span>
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={triggerSchedulerRun}
+              disabled={schedulerRunning}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-700/80 hover:bg-indigo-600 text-white text-xs font-semibold transition border border-indigo-400/30 shadow-xs"
+            >
+              <Zap className={`w-3.5 h-3.5 text-amber-300 ${schedulerRunning ? "animate-pulse" : ""}`} />
+              <span>{schedulerRunning ? "Running..." : "Run Scheduler"}</span>
+            </button>
+            <button
+              onClick={() => {
+                fetchQueue();
+                if (activeTab === "sources") fetchSources();
+              }}
+              disabled={queueLoading || sourcesLoading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white text-indigo-900 text-xs font-semibold hover:bg-indigo-50 transition shadow-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${queueLoading || sourcesLoading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Tab Switcher */}
+      <div className="flex items-center gap-2 border-b border-slate-200 mb-6">
+        <button
+          onClick={() => setActiveTab("events")}
+          className={`pb-3 px-3 text-xs font-semibold border-b-2 transition ${
+            activeTab === "events"
+              ? "border-indigo-600 text-indigo-600"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          Change Events Queue ({stats.pendingReview} pending)
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab("sources");
+            if (sources.length === 0) fetchSources();
+          }}
+          className={`pb-3 px-3 text-xs font-semibold border-b-2 transition ${
+            activeTab === "sources"
+              ? "border-indigo-600 text-indigo-600"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          Monitored Sources & Health ({sources.length > 0 ? sources.length : 43})
+        </button>
+      </div>
+
+      {activeTab === "events" && (
+        <>
 
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
@@ -513,6 +673,109 @@ export default function AdminCollegeUpdatesPage() {
           })
         )}
       </div>
+      </>
+      )}
+
+      {/* Monitored Sources Tab View */}
+      {activeTab === "sources" && (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Authoritative Monitored Sources (43 Official Endpoints)</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Periodic automated monitoring registry. Only verified colleges with registered authoritative sources are polled.
+              </p>
+            </div>
+            <button
+              onClick={fetchSources}
+              disabled={sourcesLoading}
+              className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 font-medium text-slate-700 flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <RefreshCw className={`w-3 h-3 ${sourcesLoading ? "animate-spin" : ""}`} />
+              <span>Reload Sources</span>
+            </button>
+          </div>
+
+          {sourcesLoading ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-slate-400 text-xs">
+              <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-600" />
+              Loading source registry...
+            </div>
+          ) : sources.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-slate-500 text-xs">
+              No registered sources found.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {sources.map((src) => (
+                <div key={src.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">{src.colleges?.name || src.source_name}</div>
+                        <div className="text-[11px] text-slate-500">{src.source_name}</div>
+                      </div>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        src.consecutive_failures > 0 ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"
+                      }`}>
+                        {src.consecutive_failures > 0 ? `${src.consecutive_failures} Failure(s)` : "Healthy"}
+                      </span>
+                    </div>
+
+                    <a
+                      href={src.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-indigo-600 hover:text-indigo-800 flex items-center gap-1 break-all mb-3"
+                    >
+                      <span className="truncate max-w-xs">{src.source_url}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    </a>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 bg-slate-50 rounded-lg p-2.5 mb-3">
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Type</span>
+                        <span className="font-medium">{src.source_type}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Check Interval</span>
+                        <span className="font-medium">{src.check_interval_minutes || 1440}m</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Last Checked</span>
+                        <span className="font-medium">{src.last_checked_at ? new Date(src.last_checked_at).toLocaleDateString() : "Never"}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px]">Pending Events</span>
+                        <span className="font-medium text-amber-700">{src.pendingEventsCount || 0}</span>
+                      </div>
+                    </div>
+
+                    {src.last_error && (
+                      <div className="text-[11px] text-rose-600 bg-rose-50 border border-rose-100 rounded-md p-2 mb-3">
+                        <strong>Last Error:</strong> {src.last_error}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                    <span className="text-[10px] text-slate-400">
+                      Format: <strong>{src.content_format}</strong>
+                    </span>
+                    <button
+                      onClick={() => triggerSingleSourceCheck(src.id)}
+                      className="px-2.5 py-1 text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition flex items-center gap-1"
+                    >
+                      <Zap className="w-3 h-3 text-indigo-600" />
+                      <span>Check Now</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Side-by-Side Review Modal */}
       {selectedEventId && (

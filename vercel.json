@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/college-updates",
+      "schedule": "0 2 * * *"
+    }
+  ]
+}
