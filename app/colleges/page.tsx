@@ -20,11 +20,13 @@ export default function CollegesPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedState, setSelectedState] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState("");
+  const [selectedStream, setSelectedStream] = useState("");
   const [selectedCourse, setSelectedCourse] = useState("");
   const [selectedExam, setSelectedExam] = useState("");
+  const [selectedNaac, setSelectedNaac] = useState("");
   const [selectedType, setSelectedType] = useState("");
-  const [sortBy, setSortBy] = useState<"name" | "fees_asc" | "fees_desc" | "placement_desc" | "avg_pkg_desc">("name");
+  const [sortBy, setSortBy] = useState<"name" | "placement_desc" | "avg_pkg_desc" | "programs_desc">("name");
 
   useEffect(() => {
     let isMounted = true;
@@ -67,10 +69,22 @@ export default function CollegesPage() {
   };
 
   // Unique options for filter dropdowns derived strictly from real data
-  const availableStates = useMemo(() => {
+  const availableLocations = useMemo(() => {
     const set = new Set<string>();
     colleges.forEach((c) => {
+      if (c.location) set.add(c.location);
       if (c.state) set.add(c.state);
+    });
+    return Array.from(set).sort();
+  }, [colleges]);
+
+  const availableStreams = useMemo(() => {
+    const set = new Set<string>();
+    colleges.forEach((c) => {
+      if (c.primary_stream) set.add(c.primary_stream);
+      c.courses?.forEach((crs) => {
+        if (crs.stream) set.add(crs.stream);
+      });
     });
     return Array.from(set).sort();
   }, [colleges]);
@@ -78,15 +92,34 @@ export default function CollegesPage() {
   const availableCourses = useMemo(() => {
     const set = new Set<string>();
     colleges.forEach((c) => {
-      if (c.course) set.add(c.course);
+      if (c.courses && c.courses.length > 0) {
+        c.courses.forEach((crs) => set.add(crs.course_name.trim()));
+      } else if (c.programs && c.programs.length > 0) {
+        c.programs.forEach((p) => set.add(p.trim()));
+      } else if (c.course) {
+        c.course.split(",").forEach((p) => set.add(p.trim()));
+      }
     });
-    return Array.from(set).sort();
+    return Array.from(set).filter(Boolean).sort();
   }, [colleges]);
 
   const availableExams = useMemo(() => {
     const set = new Set<string>();
     colleges.forEach((c) => {
       if (c.entrance_exam) set.add(c.entrance_exam);
+      c.courses?.forEach((crs) => {
+        crs.cutoffs?.forEach((cut) => {
+          if (cut.exam) set.add(cut.exam);
+        });
+      });
+    });
+    return Array.from(set).sort();
+  }, [colleges]);
+
+  const availableNaac = useMemo(() => {
+    const set = new Set<string>();
+    colleges.forEach((c) => {
+      if (c.naac_grade) set.add(c.naac_grade);
     });
     return Array.from(set).sort();
   }, [colleges]);
@@ -94,9 +127,17 @@ export default function CollegesPage() {
   const availableTypes = useMemo(() => {
     const set = new Set<string>();
     colleges.forEach((c) => {
-      if (c.college_type) set.add(c.college_type);
+      if (c.college_type) set.add(c.college_type.toLowerCase());
     });
     return Array.from(set).sort();
+  }, [colleges]);
+
+  const totalProgramsCount = useMemo(() => {
+    return colleges.reduce((acc, c) => acc + (c.courses?.length || c.programs?.length || 1), 0);
+  }, [colleges]);
+
+  const puneCollegesCount = useMemo(() => {
+    return colleges.filter((c) => c.location?.toLowerCase() === "pune").length;
   }, [colleges]);
 
   // Filtered & sorted colleges
@@ -107,39 +148,94 @@ export default function CollegesPage() {
           const q = searchQuery.toLowerCase();
           const matchesName = college.name?.toLowerCase().includes(q);
           const matchesLoc = college.location?.toLowerCase().includes(q);
+          const matchesState = college.state?.toLowerCase().includes(q);
+          const matchesStream = college.primary_stream?.toLowerCase().includes(q);
           const matchesCourse = college.course?.toLowerCase().includes(q);
-          if (!matchesName && !matchesLoc && !matchesCourse) return false;
+          const matchesProg = college.programs?.some((p) => p.toLowerCase().includes(q));
+          const matchesCrs = college.courses?.some(
+            (crs) => crs.course_name.toLowerCase().includes(q) || crs.stream.toLowerCase().includes(q)
+          );
+          if (
+            !matchesName &&
+            !matchesLoc &&
+            !matchesState &&
+            !matchesStream &&
+            !matchesCourse &&
+            !matchesProg &&
+            !matchesCrs
+          ) {
+            return false;
+          }
         }
 
-        if (selectedState && college.state !== selectedState) return false;
-        if (selectedCourse && college.course !== selectedCourse) return false;
-        if (selectedExam && college.entrance_exam !== selectedExam) return false;
-        if (selectedType && college.college_type !== selectedType) return false;
+        if (selectedLocation) {
+          const loc = selectedLocation.toLowerCase();
+          const matchLoc = college.location?.toLowerCase() === loc;
+          const matchState = college.state?.toLowerCase() === loc;
+          if (!matchLoc && !matchState) return false;
+        }
+
+        if (selectedStream) {
+          const s = selectedStream.toLowerCase();
+          const matchesPrimary = college.primary_stream?.toLowerCase() === s;
+          const matchesCourseStream = college.courses?.some((c) => c.stream.toLowerCase() === s);
+          if (!matchesPrimary && !matchesCourseStream) return false;
+        }
+
+        if (selectedCourse) {
+          const target = selectedCourse.toLowerCase();
+          const hasCrs = college.courses?.some((c) => c.course_name.toLowerCase() === target);
+          const hasProg = college.programs?.some((p) => p.toLowerCase() === target);
+          const matchesCourse = college.course?.toLowerCase().includes(target);
+          if (!hasCrs && !hasProg && !matchesCourse) return false;
+        }
+
+        if (selectedExam) {
+          const matchesColExam = college.entrance_exam === selectedExam;
+          const matchesCutoffExam = college.courses?.some((crs) =>
+            crs.cutoffs?.some((cut) => cut.exam === selectedExam)
+          );
+          if (!matchesColExam && !matchesCutoffExam) return false;
+        }
+
+        if (selectedNaac && college.naac_grade !== selectedNaac) return false;
+        if (selectedType && college.college_type?.toLowerCase() !== selectedType.toLowerCase()) return false;
 
         return true;
       })
       .sort((a, b) => {
-        if (sortBy === "fees_asc") {
-          return (a.fees || 0) - (b.fees || 0);
-        }
-        if (sortBy === "fees_desc") {
-          return (b.fees || 0) - (a.fees || 0);
-        }
         if (sortBy === "placement_desc") {
           return (b.placement_rate || 0) - (a.placement_rate || 0);
         }
         if (sortBy === "avg_pkg_desc") {
           return (b.avg_package || 0) - (a.avg_package || 0);
         }
+        if (sortBy === "programs_desc") {
+          const bCount = b.courses?.length || b.programs?.length || 0;
+          const aCount = a.courses?.length || a.programs?.length || 0;
+          return bCount - aCount;
+        }
         return a.name.localeCompare(b.name);
       });
-  }, [colleges, searchQuery, selectedState, selectedCourse, selectedExam, selectedType, sortBy]);
+  }, [
+    colleges,
+    searchQuery,
+    selectedLocation,
+    selectedStream,
+    selectedCourse,
+    selectedExam,
+    selectedNaac,
+    selectedType,
+    sortBy,
+  ]);
 
   const resetFilters = () => {
     setSearchQuery("");
-    setSelectedState("");
+    setSelectedLocation("");
+    setSelectedStream("");
     setSelectedCourse("");
     setSelectedExam("");
+    setSelectedNaac("");
     setSelectedType("");
     setSortBy("name");
   };
@@ -164,6 +260,48 @@ export default function CollegesPage() {
         </div>
       )}
 
+      {/* Quick Location Pills */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+        <button
+          type="button"
+          onClick={() => setSelectedLocation("")}
+          className={`px-3.5 py-1.5 rounded-full transition-all font-medium whitespace-nowrap ${
+            selectedLocation === ""
+              ? "bg-slate-900 text-white shadow-sm font-semibold"
+              : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          All Colleges ({colleges.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedLocation(selectedLocation === "Pune" ? "" : "Pune")}
+          className={`px-3.5 py-1.5 rounded-full transition-all font-medium whitespace-nowrap flex items-center gap-1.5 ${
+            selectedLocation === "Pune"
+              ? "bg-indigo-600 text-white shadow-sm font-semibold"
+              : "bg-indigo-50/70 text-indigo-700 border border-indigo-200 hover:bg-indigo-100"
+          }`}
+        >
+          <span>Pune Region Only</span>
+          <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+            selectedLocation === "Pune" ? "bg-white/20 text-white" : "bg-indigo-200/70 text-indigo-800"
+          }`}>
+            {puneCollegesCount}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setSelectedLocation(selectedLocation === "Maharashtra" ? "" : "Maharashtra")}
+          className={`px-3.5 py-1.5 rounded-full transition-all font-medium whitespace-nowrap ${
+            selectedLocation === "Maharashtra"
+              ? "bg-slate-900 text-white shadow-sm font-semibold"
+              : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          Maharashtra State
+        </button>
+      </div>
+
       {/* Search and Filters Bar */}
       <div className="bg-white border border-[#EAEAEA] rounded-2xl p-5 shadow-sm space-y-4">
         {/* Search input and Sort */}
@@ -174,7 +312,7 @@ export default function CollegesPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by college name, location, or course..."
+              placeholder="Search by college name, Pune, course, or branch..."
               className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
             />
           </div>
@@ -189,24 +327,36 @@ export default function CollegesPage() {
               className="px-3 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
             >
               <option value="name">Name (A-Z)</option>
-              <option value="fees_asc">Fees: Low to High</option>
-              <option value="fees_desc">Fees: High to Low</option>
               <option value="placement_desc">Highest Placement Rate</option>
               <option value="avg_pkg_desc">Highest Average Package</option>
+              <option value="programs_desc">Most Programs Offered</option>
             </select>
           </div>
         </div>
 
         {/* Filter Dropdowns */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 pt-3 border-t border-[#F1F5F9]">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 pt-3 border-t border-[#F1F5F9]">
           <div>
             <select
-              value={selectedState}
-              onChange={(e) => setSelectedState(e.target.value)}
+              value={selectedLocation}
+              onChange={(e) => setSelectedLocation(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 shadow-xs"
             >
-              <option value="">All States</option>
-              {availableStates.map((s) => (
+              <option value="">All Locations</option>
+              {availableLocations.map((loc) => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <select
+              value={selectedStream}
+              onChange={(e) => setSelectedStream(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 shadow-xs"
+            >
+              <option value="">All Streams</option>
+              {availableStreams.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -218,7 +368,7 @@ export default function CollegesPage() {
               onChange={(e) => setSelectedCourse(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 shadow-xs"
             >
-              <option value="">All Courses</option>
+              <option value="">All Programs / Courses</option>
               {availableCourses.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
@@ -240,21 +390,36 @@ export default function CollegesPage() {
 
           <div>
             <select
+              value={selectedNaac}
+              onChange={(e) => setSelectedNaac(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 shadow-xs"
+            >
+              <option value="">All NAAC Grades</option>
+              {availableNaac.map((ng) => (
+                <option key={ng} value={ng}>NAAC {ng}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-[#EAEAEA] bg-white text-slate-700 text-xs focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 shadow-xs"
             >
               <option value="">All College Types</option>
               {availableTypes.map((t) => (
-                <option key={t} value={t}>{t}</option>
+                <option key={t} value={t} className="capitalize">
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </option>
               ))}
             </select>
           </div>
 
-          <div className="col-span-2 sm:col-span-4 lg:col-span-1 flex items-center justify-end">
+          <div className="col-span-2 sm:col-span-3 lg:col-span-1 flex items-center justify-end">
             <button
               onClick={resetFilters}
-              className="text-xs font-semibold text-slate-500 hover:text-slate-900 py-1.5 px-3 rounded-lg hover:bg-slate-100 transition"
+              className="w-full lg:w-auto text-xs font-semibold text-slate-500 hover:text-slate-900 py-1.5 px-3 rounded-lg hover:bg-slate-100 transition text-center"
             >
               Reset Filters
             </button>
@@ -265,7 +430,8 @@ export default function CollegesPage() {
       {/* Results Header */}
       <div className="flex items-center justify-between text-xs text-slate-500 px-1">
         <span>
-          Showing <strong className="text-slate-900 font-bold">{filteredColleges.length}</strong> accredited colleges
+          Showing <strong className="text-slate-900 font-bold">{filteredColleges.length}</strong> accredited colleges across{" "}
+          <strong className="text-slate-900 font-bold">{totalProgramsCount}</strong> programs
         </span>
       </div>
 

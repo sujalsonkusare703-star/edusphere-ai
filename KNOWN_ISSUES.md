@@ -78,3 +78,20 @@ No currently known unresolved issues.
 - **FIX**: Corrected `lib/supabase/seed_opportunities.sql` to map all 8 colleges to the valid constraint values ('government', 'private').
 - **VERIFICATION**: All 8 colleges seeded successfully; query verified 11 colleges present in database.
 - **LAST VERIFIED**: 2026-09-16
+
+---
+
+### ISSUE 6: Signup Rate-Limit Error ("email rate limit exceeded") & Double-Click Concurrency Guard
+- **SEVERITY**: Medium (Prevented rapid repeated student registrations)
+- **STATUS**: RESOLVED / DOCUMENTED
+- **SYMPTOM**: On deployed Vercel instance, signup form displayed `"Too many signup attempts. Please wait a few moments before trying again."`
+- **ROOT CAUSE**:
+  1. Audited application codebase: EduSphere AI sends exactly **ONE** `supabase.auth.signUp()` network request per submission. There is no duplicate form submission, no `onClick`+`onSubmit` duplication, no `useEffect` calling signup, no automatic retry loop, and no page load request.
+  2. The error originates upstream from Supabase Auth (`HTTP 429: email rate limit exceeded`). Supabase projects using the default built-in email service enforce a strict project-level rate limit (typically 3 to 30 signup confirmation emails per hour per project, and 30 signups/hour per IP).
+  3. Identified a minor client vulnerability: rapid double-clicks on the submit button before React state updates could theoretically dispatch concurrent requests in the same microtask.
+- **FIX**:
+  1. Added synchronous `useRef` lock (`isSubmittingRef.current = true`) in `app/signup/page.tsx` for `handleSignup` and `handleResendSignupEmail`, instantly preventing duplicate in-flight requests on rapid double-clicks or keypresses.
+  2. Preserved exact rate limit error mapping and recommended configuring Custom SMTP in Supabase Dashboard (Settings &rarr; Authentication &rarr; SMTP Settings) or adjusting Rate Limits under Authentication Settings to lift the email rate limit.
+- **VERIFICATION**: Programmatic network interception verified exactly 1 request sent per click. Simulated 5 concurrent rapid clicks and verified exactly 1 network call executed. `npm run lint` and `npm run build` passed with zero errors.
+- **LAST VERIFIED**: 2026-09-21
+

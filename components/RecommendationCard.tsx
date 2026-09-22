@@ -15,6 +15,7 @@ import {
   CheckCircle,
   MapPin,
   ArrowRight,
+  ExternalLink,
 } from "@/components/icons";
 
 export function RecommendationCard({ item }: { item: RecommendationItem }) {
@@ -41,8 +42,8 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
           badgeBg: "bg-indigo-50 text-indigo-700 border border-indigo-200",
           border: "hover:border-indigo-300",
           label: "College Match",
-          exploreHref: "/colleges",
-          exploreLabel: "Explore All Colleges",
+          exploreHref: item.college?.id ? `/colleges/${item.college.id}` : "/colleges",
+          exploreLabel: "View College Details",
         };
       case "internship":
         return {
@@ -131,6 +132,11 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
               <h3 className="text-base font-bold text-slate-900 leading-snug truncate">
                 {item.title}
               </h3>
+              {item.item_type === "college" && item.target_program_name ? (
+                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-indigo-700 font-semibold truncate">
+                  <span className="truncate">Program: {item.target_program_name}</span>
+                </div>
+              ) : null}
               <p className="text-xs sm:text-sm font-medium text-slate-500 mt-0.5 truncate">
                 {item.subtitle}
               </p>
@@ -139,14 +145,26 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
 
           {/* Quick Opportunity Meta Pill Row */}
           <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+            {/* Cutoff Status Pill for Colleges */}
+            {item.item_type === "college" && item.cutoff_status && (
+              <span
+                className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border flex items-center gap-1 ${
+                  item.cutoff_status === "Cutoff compatible"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : item.cutoff_status === "Cutoff not met"
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+                }`}
+              >
+                {item.cutoff_status === "Cutoff compatible" && "✓ "}
+                {item.cutoff_status === "Cutoff not met" && "⚠ "}
+                {item.cutoff_status === "Cutoff unavailable" && "○ "}
+                {item.cutoff_status}
+              </span>
+            )}
             {item.item_type === "college" && item.relevant_cutoff && (
               <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100">
                 {item.relevant_cutoff}
-              </span>
-            )}
-            {item.item_type === "college" && item.college?.fees && (
-              <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-medium">
-                ₹{item.college.fees.toLocaleString("en-IN")} / yr
               </span>
             )}
             {item.item_type === "placement" && item.eligibility_text && (
@@ -207,6 +225,17 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
                 Factor Breakdown
               </span>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-slate-600 font-medium">
+                {item.factor_breakdown.cutoff_match !== undefined && (
+                  <div>
+                    <div className="flex justify-between mb-0.5">
+                      <span>Cutoff Match</span>
+                      <span className="font-bold">{item.factor_breakdown.cutoff_match}%</span>
+                    </div>
+                    <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${item.factor_breakdown.cutoff_match}%` }} />
+                    </div>
+                  </div>
+                )}
                 {item.factor_breakdown.academic_match !== undefined && (
                   <div>
                     <div className="flex justify-between mb-0.5">
@@ -338,14 +367,25 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
                 Factor Breakdown & Match Explainability
               </span>
               <div className="space-y-2.5">
+                {item.factor_breakdown.cutoff_match !== undefined && (
+                  <div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-600 font-medium">Cutoff Compatibility</span>
+                      <span className="font-bold text-indigo-600">{item.factor_breakdown.cutoff_match}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${item.factor_breakdown.cutoff_match}%` }} />
+                    </div>
+                  </div>
+                )}
                 {item.factor_breakdown.academic_match !== undefined && (
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-600 font-medium">Academic Match & Cutoff Alignment</span>
-                      <span className="font-bold text-indigo-600">{item.factor_breakdown.academic_match}%</span>
+                      <span className="text-slate-600 font-medium">Academic Standards & Accreditation</span>
+                      <span className="font-bold text-slate-900">{item.factor_breakdown.academic_match}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${item.factor_breakdown.academic_match}%` }} />
+                      <div className="h-full bg-slate-700 rounded-full" style={{ width: `${item.factor_breakdown.academic_match}%` }} />
                     </div>
                   </div>
                 )}
@@ -363,7 +403,7 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
                 {item.factor_breakdown.skill_match !== undefined && (
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-600 font-medium">Skill Match & Overlap</span>
+                      <span className="text-slate-600 font-medium">Technical Skill Overlap</span>
                       <span className="font-bold text-emerald-600">{item.factor_breakdown.skill_match}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
@@ -374,7 +414,7 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
                 {item.factor_breakdown.location_match !== undefined && (
                   <div>
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-slate-600 font-medium">Location & Work Mode Preference</span>
+                      <span className="text-slate-600 font-medium">Location Preference</span>
                       <span className="font-bold text-blue-600">{item.factor_breakdown.location_match}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
@@ -388,25 +428,175 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
 
           {/* College details preview */}
           {item.item_type === "college" && item.college && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA]">
-                <span className="text-xs text-slate-500 block mb-1">College Type & Exam</span>
-                <span className="text-base font-bold text-slate-900">
-                  {item.college.college_type || "Premier Institute"} • {item.college.entrance_exam || "Merit"}
-                </span>
+            <div className="space-y-4">
+              {/* Program & Cutoff Evaluation Highlight */}
+              <div className="p-4 rounded-xl bg-indigo-50/50 border border-indigo-100 space-y-2.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-indigo-950">
+                    Program Evaluated: {item.target_program_name || item.subtitle.split("•")[0]?.trim()}
+                  </span>
+                  {item.cutoff_status && (
+                    <span
+                      className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                        item.cutoff_status === "Cutoff compatible"
+                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          : item.cutoff_status === "Cutoff not met"
+                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                          : "bg-slate-100 text-slate-700 border-slate-200"
+                      }`}
+                    >
+                      {item.cutoff_status}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">Entrance Exam</span>
+                    <strong className="text-slate-900 font-semibold">{item.cutoff_exam || item.college.entrance_exam || "MHT CET"}</strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">Published Cutoff</span>
+                    <strong className="text-slate-900 font-semibold">
+                      {item.cutoff_value !== null && item.cutoff_value !== undefined
+                        ? item.cutoff_unit === "rank"
+                          ? `AIR ${item.cutoff_value} (${item.cutoff_category || "OPEN"})`
+                          : (item.cutoff_unit === "score" || item.cutoff_unit === "marks" || (item.cutoff_exam && (item.cutoff_exam.toUpperCase().includes("NATA") || item.cutoff_exam.toUpperCase().includes("LAW"))))
+                          ? `${item.cutoff_value} ${item.cutoff_exam?.toUpperCase().includes("NATA") ? "/ 200 marks" : item.cutoff_exam?.toUpperCase().includes("LAW") ? "/ 150 marks" : "marks"} (${item.cutoff_category || "OPEN"})`
+                          : `${item.cutoff_value}%ile (${item.cutoff_category || "OPEN"})`
+                        : "Not available"}
+                    </strong>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100">
+                    <span className="text-[10px] text-slate-500 block">Your Score</span>
+                    <strong className="text-slate-900 font-semibold">
+                      {item.student_score !== null && item.student_score !== undefined
+                        ? item.cutoff_unit === "rank"
+                          ? `Rank ${item.student_score}`
+                          : (item.cutoff_unit === "score" || item.cutoff_unit === "marks" || (item.cutoff_exam && (item.cutoff_exam.toUpperCase().includes("NATA") || item.cutoff_exam.toUpperCase().includes("LAW"))))
+                          ? `${item.student_score} ${item.cutoff_exam?.toUpperCase().includes("NATA") ? "/ 200 marks" : item.cutoff_exam?.toUpperCase().includes("LAW") ? "/ 150 marks" : "marks"}`
+                          : `${item.student_score}%ile`
+                        : "Not specified"}
+                    </strong>
+                  </div>
+                </div>
+
+                {item.college.accepted_exams && item.college.accepted_exams.length > 0 && (
+                  <div className="p-2.5 rounded-lg bg-white border border-indigo-100 text-xs">
+                    <span className="text-[10px] text-slate-500 block mb-1">Accepted Entrance Exams</span>
+                    <div className="flex flex-wrap gap-1">
+                      {item.college.accepted_exams.map((ex, idx) => (
+                        <span key={idx} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium text-[10px]">
+                          {ex}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  {item.cutoff_status === "Cutoff compatible"
+                    ? "Based on the published cutoff available in the EduSphere dataset: your score meets or exceeds this historical benchmark."
+                    : item.cutoff_status === "Cutoff not met"
+                    ? "Based on the published cutoff available in the EduSphere dataset: your score is below this historical benchmark."
+                    : "Eligibility cannot be determined from cutoff data for this program in the current dataset. Evaluated on academic and domain alignment."}
+                </p>
               </div>
-              <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA]">
-                <span className="text-xs text-slate-500 block mb-1">Campus Placement Rate</span>
-                <span className="text-base font-bold text-slate-900">
-                  {item.college.placement_rate ? `${item.college.placement_rate}% Track Record` : "85% Avg"}
-                </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA]">
+                  <span className="text-xs text-slate-500 block mb-1">College Type & Accreditation</span>
+                  <span className="text-base font-bold text-slate-900">
+                    {item.college.college_type ? item.college.college_type.toUpperCase() : "Accredited"}
+                    {item.college.naac_grade ? ` • NAAC Grade ${item.college.naac_grade}` : ""}
+                  </span>
+                </div>
+                <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA]">
+                  <span className="text-xs text-slate-500 block mb-1">Campus Placement Rate</span>
+                  <span className="text-base font-bold text-slate-900">
+                    {item.college.placement_rate !== null && item.college.placement_rate !== undefined
+                      ? `${item.college.placement_rate}% Track Record`
+                      : "Data not published"}
+                  </span>
+                </div>
+                <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA] sm:col-span-2">
+                  <span className="text-xs text-slate-500 block mb-1">Campus Location</span>
+                  <span className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                    <MapPin className="w-4 h-4 text-slate-400" />
+                    {item.college.location ? `${item.college.location}, ` : ""}{item.college.state || "Maharashtra, India"}
+                  </span>
+                </div>
+
+                {/* Admission & Eligibility Pathway */}
+                <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA] sm:col-span-2 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap pb-2 border-b border-slate-200">
+                    <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                      Admission Pathway & Eligibility
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {item.college.admission_verification_status === "VERIFIED" ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          VERIFIED
+                        </span>
+                      ) : item.college.admission_verification_status === "DERIVED" ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                          DERIVED
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          NOT VERIFIED
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 font-medium">Admission Route</span>
+                      <p className="text-slate-800 font-medium leading-relaxed">
+                        {item.college.admission_route || "Not specified in source"}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block mb-0.5 font-medium">Academic Eligibility</span>
+                      <p className="text-slate-800 font-medium leading-relaxed">
+                        {item.college.eligibility_criteria || "Not specified in source"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2 text-[11px] text-slate-500 flex-wrap">
+                    <span>
+                      {item.college.admission_verification_status === "VERIFIED"
+                        ? "Verified from official authority portal"
+                        : "Derived: Based on general regulatory framework"}
+                    </span>
+                    {item.college.admission_source_url && (
+                      <a
+                        href={item.college.admission_source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-1"
+                      >
+                        <span>{item.college.admission_source_name || "Official Authority Link"}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA] sm:col-span-2">
-                <span className="text-xs text-slate-500 block mb-1">Campus Location</span>
-                <span className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
-                  <MapPin className="w-4 h-4 text-slate-400" />
-                  {item.college.location ? `${item.college.location}, ` : ""}{item.college.state || "India"}
-                </span>
+
+              {/* Data Transparency Notice */}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 space-y-1">
+                <div className="font-semibold text-slate-700 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                  <span>Cutoff source: {item.source_attribution || "EduSphere verified dataset"}</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  Admission decisions are subject to official counselling/admission authorities (e.g. Maharashtra State CET Cell). EduSphere AI does not predict or guarantee admissions.
+                </p>
               </div>
             </div>
           )}

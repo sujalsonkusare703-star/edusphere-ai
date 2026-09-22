@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -27,6 +27,7 @@ export default function SignupPage() {
   const [requiresEmailConfirmation, setRequiresEmailConfirmation] = useState(false);
   const [resendInfo, setResendInfo] = useState("");
 
+  const isSubmittingRef = useRef(false);
   const supabase = createClient();
 
   // Calculate password strength
@@ -49,6 +50,8 @@ export default function SignupPage() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingRef.current || loading) return;
+
     setErrorMsg("");
     setResendInfo("");
 
@@ -73,6 +76,7 @@ export default function SignupPage() {
       return;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
 
     try {
@@ -119,11 +123,14 @@ export default function SignupPage() {
       console.error("Signup error:", err);
       setErrorMsg("A network error occurred. Please check your connection and try again.");
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };
 
   const handleResendSignupEmail = async () => {
+    if (isSubmittingRef.current || loading) return;
+    isSubmittingRef.current = true;
     setLoading(true);
     setResendInfo("");
     try {
@@ -137,6 +144,7 @@ export default function SignupPage() {
       const message = err instanceof Error ? err.message : "Failed to resend confirmation.";
       setErrorMsg(message);
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };

@@ -1,0 +1,31 @@
+college_id,college_name,college_type,courses,annual_tuition_fee,avg_package,highest_package,placement_rate,entrance_exam,city
+1,"COEP Technological University",Government,"CSE, IT, Mechanical, Civil, Electrical",95000,10.5,52.0,90,"MHT CET/JEE Main",Pune
+2,"Government College of Engineering Pune",Government,"CSE, Mechanical, Civil, E&TC",90000,8.8,34.0,85,"MHT CET",Pune
+3,"Pune Institute of Computer Technology (PICT)",Private,"CSE, IT, E&TC",110000,9.8,47.0,94,"MHT CET/JEE Main",Pune
+4,"Vishwakarma Institute of Technology",Private,"CSE, IT, Mechanical, Civil",195000,7.8,51.0,90,"MHT CET/JEE Main",Pune
+5,"MIT World Peace University",Private,"CSE, AI, Mechanical, Civil",330000,6.5,51.0,85,"MHT CET/JEE Main",Pune
+6,"MIT Academy of Engineering",Private,"CSE, AI, Robotics, Mechanical",185000,6.2,25.0,82,"MHT CET/JEE Main",Pune
+7,"Pimpri Chinchwad College of Engineering",Private,"CSE, IT, Civil, Mechanical",145000,6.0,44.0,88,"MHT CET/JEE Main",Pune
+8,"PCCOE & Research",Private,"CSE, AI, IT",150000,5.8,22.0,82,"MHT CET/JEE Main",Pune
+9,"DY Patil College of Engineering Akurdi",Private,"CSE, IT, Mechanical",135000,5.5,28.0,84,"MHT CET/JEE Main",Pune
+10,"DY Patil Institute of Engineering & Technology",Private,"CSE, IT, Civil",125000,5.0,20.0,78,"MHT CET/JEE Main",Pune
+11,"Army Institute of Technology",Private,"CSE, IT, Mechanical",170000,9.2,48.0,95,"JEE Main",Pune
+12,"Cummins College of Engineering",Private,"CSE, IT, E&TC",150000,7.0,25.0,88,"MHT CET",Pune
+13,"AISSMS College of Engineering",Private,"CSE, Civil, Mechanical",120000,5.0,18.0,80,"MHT CET/JEE Main",Pune
+14,"AISSMS Institute of Information Technology",Private,"CSE, IT, AI",140000,5.8,19.0,82,"MHT CET/JEE Main",Pune
+15,"Sinhgad College of Engineering",Private,"CSE, IT, Civil",115000,4.8,16.0,75,"MHT CET/JEE Main",Pune
+16,"Sinhgad Academy of Engineering",Private,"CSE, AI, IT",110000,4.5,15.0,72,"MHT CET/JEE Main",Pune
+17,"Sinhgad Institute of Technology",Private,"CSE, Civil, Mechanical",105000,4.2,12.0,70,"MHT CET/JEE Main",Pune
+18,"JSPM Rajarshi Shahu College of Engineering",Private,"CSE, IT, E&TC",125000,4.5,15.0,72,"MHT CET/JEE Main",Pune
+19,"JSPM Bhivarabai Sawant Institute",Private,"CSE, Civil, Mechanical",115000,4.0,11.0,68,"MHT CET/JEE Main",Pune
+20,"MMCOE (Marathwada Mitra Mandal)",Private,"CSE, IT, Mechanical",140000,5.2,17.0,80,"MHT CET/JEE Main",Pune
+21,"PVG College of Engineering",Private,"CSE, IT, Mechanical",130000,5.4,18.0,82,"MHT CET/JEE Main",Pune
+22,"PES Modern College of Engineering",Private,"CSE, IT, Civil",145000,5.6,21.0,83,"MHT CET/JEE Main",Pune
+23,"Indira College of Engineering & Management",Private,"CSE, AI, IT",135000,4.3,12.0,70,"MHT CET/JEE Main",Pune
+24,"Zeal College of Engineering",Private,"CSE, IT, Mechanical",125000,4.1,10.0,68,"MHT CET/JEE Main",Pune
+25,"Dhole Patil College of Engineering",Private,"CSE, Civil, Mechanical",120000,3.9,9.0,65,"MHT CET/JEE Main",Pune
+26,"Trinity College of Engineering & Research",Private,"CSE, AI, IT",120000,4.2,11.0,69,"MHT CET/JEE Main",Pune
+27,"G.H. Raisoni College of Engineering & Management",Private,"CSE, AI, IT",140000,4.8,16.0,76,"MHT CET/JEE Main",Pune
+28,"PDEA College of Engineering Manjari",Private,"CSE, Civil, Mechanical",115000,4.0,10.0,66,"MHT CET/JEE Main",Pune
+29,"Smt. Kashibai Navale College of Engineering",Private,"CSE, IT, Mechanical",125000,4.4,13.0,71,"MHT CET/JEE Main",Pune
+30,"MIT Art, Design & Technology University",Private,"CSE, AI, Data Science",250000,5.9,23.0,80,"MHT CET/JEE Main",Pune

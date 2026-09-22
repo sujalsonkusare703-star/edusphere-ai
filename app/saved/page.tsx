@@ -11,7 +11,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { useAuth } from "@/context/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import { SavedItem, College, Internship, Placement } from "@/types";
-import { demoColleges, demoInternships, demoPlacements } from "@/lib/demo-data";
+import { demoInternships, demoPlacements } from "@/lib/demo-data";
+import { EDUSPHERE_COLLEGES_DATASET } from "@/lib/data/edusphere-colleges-dataset";
 import {
   Bookmark,
   Building2,
@@ -24,15 +25,15 @@ import { mapDatabaseCollege, mapDatabaseInternship, mapDatabasePlacement } from 
 
 function getDemoItemForId(id: string, studentProfileId: string = "sp-demo-001"): SavedItem | null {
   const normalId = dbUuidToItemId(id);
-  const col = demoColleges.find((c) => c.id === id || c.id === normalId);
-  if (col) {
+  const collegeMatch = EDUSPHERE_COLLEGES_DATASET.find((c) => c.id === id || c.id === normalId);
+  if (collegeMatch) {
     return {
-      id: `saved-${col.id}`,
+      id: `saved-${collegeMatch.id}`,
       student_profile_id: studentProfileId,
       item_type: "college",
-      item_id: col.id,
+      item_id: collegeMatch.id,
       saved_at: new Date().toISOString(),
-      college: col,
+      college: collegeMatch,
     };
   }
   const int = demoInternships.find((i) => i.id === id || i.id === normalId);
@@ -98,6 +99,13 @@ export default function SavedPage() {
                   collegesMap[c.id] = mapDatabaseCollege(c);
                 });
               }
+              // Supplement with imported dataset if not yet in database
+              collegeIds.forEach((cid) => {
+                if (!collegesMap[cid]) {
+                  const matchedCol = EDUSPHERE_COLLEGES_DATASET.find((p) => p.id === cid || dbUuidToItemId(p.id) === cid);
+                  if (matchedCol) collegesMap[cid] = matchedCol;
+                }
+              });
             }
 
             const internshipsMap: Record<string, Internship> = {};

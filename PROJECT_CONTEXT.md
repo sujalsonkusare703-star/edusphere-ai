@@ -14,11 +14,12 @@
   8. **Phase 2, Step 8**: Comprehensive End-to-End Testing & Production Audit (14 routes, all test suites passed)
   9. **Profile Persistence & RLS Resolution**: Elimination of PostgreSQL error 42P17 (infinite recursion in `profiles` RLS policy) via direct scalar checks (`auth.uid() = id`), atomic upsert flow in `AuthContext.tsx`, and provided idempotent migration `lib/supabase/fix_profiles_rls.sql`.
   10. **Official Logo & Brand Asset Integration**: Complete visual implementation of official 3D graduation cap 'E' mark and "EduSphere Ai" wordmark across `Navbar`, `Sidebar`, `DashboardShell`, auth pages (`/login`, `/signup`), landing page footer, `AICareerAssistant`, and browser/metadata icons (`favicon.ico`, `icon.png`, `apple-icon.png`).
+  11. **50 Colleges, 205 Courses & 154 MHT CET Cutoffs Full Relational Integration**: Established normalized relational architecture across `public.colleges`, `public.college_courses`, and `public.college_cutoffs`. Generated idempotent migration `lib/supabase/import_mhtcet_cutoffs_dataset.sql`, created offline-first dataset `lib/data/edusphere-colleges-dataset.ts`, added course details & category cutoffs (OPEN, OBC, SC, ST) to `CollegeCard`, added Stream & NAAC filters to `/colleges`, and upgraded `computeCollegeGuidance` with real cutoff benchmarking.
 - **Current Priority**:
-  - Maintain verified stability; execute `lib/supabase/fix_profiles_rls.sql` in Supabase SQL Editor if setting up fresh database instances.
+  - Execute `lib/supabase/import_mhtcet_cutoffs_dataset.sql` in Supabase SQL Editor for production database parity.
   - Zero unresolved runtime defects in application code.
 - **Next**:
-  - Final end-to-end testing → final presentation/documentation.
+  - Final review and verification.
 
 ---
 
@@ -108,10 +109,13 @@ The codebase is strictly organized by functional domain. The following key direc
 ├── context/
 │   └── AuthContext.tsx              # Single source of truth for auth & student state
 ├── lib/
+│   ├── data/
+│   │   └── pune-colleges-dataset.ts # Typed 30 Pune engineering colleges opportunity dataset
 │   ├── supabase/
 │   │   ├── client.ts                # Browser singleton Supabase client
 │   │   ├── db-helpers.ts            # UUID converters and skill normalizers
 │   │   ├── fix_profiles_rls.sql     # Idempotent RLS repair script for error 42P17
+│   │   ├── import_pune_colleges.sql # Idempotent 30 Pune colleges migration & program normalization
 │   │   ├── opportunities.ts         # Authoritative Supabase catalog queries
 │   │   └── seed_opportunities.sql   # Seed dataset for colleges, internships, placements
 │   ├── ai-context.ts                # Grounded prompt context builder for AI assistant
@@ -177,8 +181,10 @@ public.student_profiles
                             - created_at (timestamptz)
 
 Opportunity Catalog Tables (Public read, RLS protected against client mutation):
-- public.colleges (11 rows)
-    - id (UUID, PK), name, location, state, course, fees, avg_package, highest_package, placement_rate, college_type (CHECK in 'government', 'private', 'semi-government'), entrance_exam
+- public.colleges (30 Pune Engineering Colleges + curated national universities)
+    - id (UUID, PK), name, location, state, course, fees, avg_package (INR), highest_package (INR), placement_rate, college_type (CHECK in 'government', 'private', 'autonomous'), entrance_exam, data_source ('EduSphere imported dataset')
+- public.college_programs (Normalized branch/program relation, UNIQUE on college_id, program_name)
+    - id (UUID, PK), college_id (UUID, FK -> colleges.id ON DELETE CASCADE), program_name (text), created_at (timestamptz)
 - public.internships (9 rows)
     - id (UUID, PK), company, role, location, remote (boolean), stipend (numeric, CHECK >= 0), duration
 - public.internship_skills (35 rows)

@@ -4,6 +4,43 @@ All notable technical changes, architectural migrations, and bugfixes are record
 
 ---
 
+## [2026-09-22] Phase 3, Step 1: Upgraded College Intelligence Experience
+- **Change**: Upgraded the College Intelligence directory and details experience to be production-grade, responsive, and strictly grounded in real Supabase database records (`public.colleges`, `public.college_courses`, and `public.college_cutoffs`).
+  - **Dedicated College Detail Page**: Created App Router dynamic route `app/colleges/[id]/page.tsx` with Overview, Sanctioned Programs, category percentiles (OPEN, OBC, SC, ST), Program URL resolver, and Data Transparency & Information Availability section.
+  - **Directory Card Upgrades**: Updated `components/CollegeCard.tsx` with direct Next.js `<Link>` to `/colleges/[id]`, verified official website external link, NAAC grade badge (only when available), and Annual Tuition: NA.
+  - **Data Access Layer**: Added `fetchCollegeById` and `resolveProgramUrlInfo` in `lib/supabase/opportunities.ts` distinguishing departmental URLs from institutional homepage fallbacks.
+  - **Icons**: Added `ArrowLeft` and `HelpCircle` SVG icon components in `components/icons.tsx`.
+- **Files Affected**:
+  - `app/colleges/[id]/page.tsx`
+  - `components/CollegeCard.tsx`
+  - `lib/supabase/opportunities.ts`
+  - `components/icons.tsx`
+  - `CHANGELOG.md`
+- **Testing Result**: PASS. `npm run lint` (0 errors, 0 warnings), `npm run build` (all 15 routes compiled with 0 errors). Section H test checkpoints 1-10 verified.
+
+---
+
+## [2026-09-22] 50 Colleges, 205 Courses & 154 MHT CET Cutoffs Full Relational Integration
+- **Change**: Integrated comprehensive dataset from three MySQL dumps (`colleges.sql`, `courses.sql`, `cutoffs.sql`) into EduSphere AI and Supabase PostgreSQL.
+  - **Schema & Migration**: Created idempotent PostgreSQL script `lib/supabase/import_mhtcet_cutoffs_dataset.sql` that alters `public.colleges` (adding `primary_stream`, `naac_grade`, `official_website`), creates normalized `public.college_courses` (intake, stream, course_name) and `public.college_cutoffs` (exam, OPEN, OBC, SC, ST category percentiles/scores), complete with RLS and performance indexes.
+  - **Data Layer & Fallback**: Added `lib/data/edusphere-colleges-dataset.ts` with 50 colleges, 205 courses, and 154 cutoffs embedded. Updated `lib/supabase/opportunities.ts` to query `public.colleges`, `public.college_courses`, and `public.college_cutoffs`, assembling hierarchical data with seamless fallback.
+  - **Types**: Extended `College`, `CollegeCourse`, and `CollegeCutoff` in `types/index.ts`.
+  - **Discovery UI**: Enhanced `components/CollegeCard.tsx` with NAAC Grade badges, primary stream tags, official website external links, and full courses & category cutoffs table in the details modal. Upgraded `app/colleges/page.tsx` with Stream and NAAC grade filters, search across branches and streams, and total program counts.
+  - **AI Recommendation Engine**: Enhanced `computeCollegeGuidance` in `lib/ai-guidance.ts` to compare student entrance scores directly against verified course-level MHT CET / CET cutoffs, generating factual, transparent justification reasons without fabricating data.
+- **Files Affected**:
+  - `lib/supabase/import_mhtcet_cutoffs_dataset.sql`
+  - `lib/data/edusphere-colleges-dataset.ts`
+  - `types/index.ts`
+  - `lib/supabase/opportunities.ts`
+  - `components/CollegeCard.tsx`
+  - `components/icons.tsx`
+  - `app/colleges/page.tsx`
+  - `app/saved/page.tsx`
+  - `lib/ai-guidance.ts`
+- **Testing Result**: PASS. `npm run lint` (0 errors, 0 warnings), `npm run build` (all 15 routes compiled cleanly), end-to-end relational data integrity verified across all 50 colleges, 205 courses, and 154 cutoffs.
+
+---
+
 ## [2026-09-15] Phase 2, Step 1: Real Supabase Authentication
 - **Change**: Replaced demo authentication mock with real Supabase Authentication using `@supabase/ssr` browser client. Implemented signup, password sign-in, session state tracking in `AuthContext`, user session restoration on page reload, and route protection via `ProtectedRoute`.
 - **Files Affected**:
@@ -138,3 +175,46 @@ All notable technical changes, architectural migrations, and bugfixes are record
   - `components/ai-guidance/AICareerAssistant.tsx` (Updated AI assistant avatar and message bubble branding)
   - `public/brand/*`, `public/icon.png`, `public/favicon.ico`, `app/icon.png`, `app/favicon.ico`, `public/apple-icon.png`
 - **Testing Result**: PASS. `npm run lint` passed with 0 errors and 0 warnings; `npm run build` compiled 15/15 static pages cleanly with zero regressions.
+
+---
+
+## [2026-09-21] 30 Pune Engineering Colleges Dataset & Program Normalization Integration
+- **Change**: Integrated user-uploaded 30 Pune engineering colleges CSV dataset into EduSphere AI and Supabase database.
+  - Implemented normalized program relations via `public.college_programs` (`(college_id, program_name)` UNIQUE, RLS enabled).
+  - Built idempotent, deterministic SQL migration and seeding script `lib/supabase/import_pune_colleges.sql` that matches and updates existing colleges (COEP and MIT ADT) without duplication, preserves existing data, and annotates provenance with `data_source = 'EduSphere imported dataset'`.
+  - Normalized package units from LPA to integer INR values (`LPA * 100,000`) for consistency with frontend formatting and sorting.
+  - Extended `College` interface with `programs?: string[]` and `data_source?: string | null`.
+  - Updated `fetchColleges` in `lib/supabase/opportunities.ts` to batch fetch normalized programs from `public.college_programs` with seamless fallback and dataset merging.
+  - Enhanced `app/colleges/page.tsx` with search across college names, location (Pune/Maharashtra), branches/programs, case-insensitive college types, and sorting by fees, placement rate, and avg package.
+  - Upgraded `CollegeCard.tsx` to display program tag badges in card and modal previews and display data provenance.
+  - Integrated normalized programs into `computeCollegeGuidance` in `lib/ai-guidance.ts` for granular branch alignment scoring.
+  - Verified saved items functionality (`app/saved/page.tsx`) to support bookmarking and unsaving any of the 30 Pune colleges.
+- **Files Affected**:
+  - `data/Edusphere_Ai_Dataset.csv` (Preserved authoritative raw dataset)
+  - `lib/data/pune-colleges-dataset.ts` (New: Typed dataset matching migration)
+  - `lib/supabase/import_pune_colleges.sql` (New: Idempotent Supabase migration)
+  - `types/index.ts` (Updated `College` and added `CollegeProgram`)
+  - `lib/supabase/opportunities.ts` (Updated `fetchColleges` and `mapDatabaseCollege`)
+  - `components/CollegeCard.tsx` (Enhanced program badges and modal)
+  - `app/colleges/page.tsx` (Enhanced filters, location, and branch search)
+  - `app/saved/page.tsx` (Enhanced saved items support for imported colleges)
+  - `lib/ai-guidance.ts` (Enhanced branch match using normalized programs)
+  - `PROJECT_CONTEXT.md` (Updated memory with dataset and schema details)
+  - `CHANGELOG.md` (Documented integration entry)
+- **Testing Result**: PASS. All programmatic tests passed; `npm run lint` passed with 0 errors and 0 warnings; `npm run build` compiled 15/15 routes successfully.
+
+---
+
+## [2026-09-21] Signup Rate-Limit Investigation & Double-Click Concurrency Lock
+- **Change**: Conducted comprehensive audit of EduSphere AI signup architecture to investigate Vercel rate-limit error: `"Too many signup attempts. Please wait a few moments before trying again."`
+  - Programmatically traced network execution: confirmed exactly **ONE** `POST /auth/v1/signup` request is dispatched per user submission.
+  - Confirmed zero duplicate form submissions, zero `onClick`/`onSubmit` collisions, zero `useEffect` invocations, zero automatic retry loops, zero page-load requests, and zero React Strict Mode side-effects.
+  - Identified root cause as upstream Supabase Auth rate limiting (`HTTP 429: email rate limit exceeded`), triggered by the default Supabase built-in test email service (limited to 3-30 confirmation emails per hour per project).
+  - Hardened client submission against rapid double-clicks/keyboard bursts by implementing synchronous `useRef` locks (`isSubmittingRef.current = true`) in `handleSignup` and `handleResendSignupEmail` in `app/signup/page.tsx`.
+- **Files Affected**:
+  - `app/signup/page.tsx`
+  - `KNOWN_ISSUES.md`
+  - `CHANGELOG.md`
+- **Testing Result**: PASS. Programmatic network trace confirmed 1 request per click; 5 concurrent clicks safely reduced to 1 network call; `npm run lint` and `npm run build` passed with 0 errors/0 warnings.
+
+

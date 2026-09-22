@@ -138,9 +138,58 @@ export default function RecommendationsPage() {
     return computeAIGuidanceOverview(profile, studentProfile, skills, careerReport.readiness);
   }, [profile, studentProfile, skills, careerReport.readiness]);
 
+  const [collegeCutoffFilter, setCollegeCutoffFilter] = useState<
+    "all" | "Cutoff compatible" | "Cutoff not met" | "Cutoff unavailable"
+  >("all");
+  const [collegeBranchFilter, setCollegeBranchFilter] = useState<string>("all");
+  const [collegeLocationFilter, setCollegeLocationFilter] = useState<string>("all");
+
   const collegeRecommendations = useMemo(() => {
-    return computeCollegeGuidance(studentProfile, colleges);
-  }, [studentProfile, colleges]);
+    return computeCollegeGuidance(studentProfile, colleges, skills);
+  }, [studentProfile, colleges, skills]);
+
+  const collegeFilterOptions = useMemo(() => {
+    const branches = new Set<string>();
+    const locations = new Set<string>();
+    let compatibleCount = 0;
+    let notMetCount = 0;
+    let unavailableCount = 0;
+
+    collegeRecommendations.forEach((item) => {
+      if (item.target_program_name) {
+        branches.add(item.target_program_name);
+      }
+      if (item.college?.location) {
+        locations.add(item.college.location);
+      }
+      if (item.cutoff_status === "Cutoff compatible") compatibleCount++;
+      else if (item.cutoff_status === "Cutoff not met") notMetCount++;
+      else unavailableCount++;
+    });
+
+    return {
+      branches: Array.from(branches).sort(),
+      locations: Array.from(locations).sort(),
+      compatibleCount,
+      notMetCount,
+      unavailableCount,
+    };
+  }, [collegeRecommendations]);
+
+  const filteredCollegeRecommendations = useMemo(() => {
+    return collegeRecommendations.filter((item) => {
+      if (collegeCutoffFilter !== "all" && item.cutoff_status !== collegeCutoffFilter) {
+        return false;
+      }
+      if (collegeBranchFilter !== "all" && item.target_program_name !== collegeBranchFilter) {
+        return false;
+      }
+      if (collegeLocationFilter !== "all" && item.college?.location !== collegeLocationFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [collegeRecommendations, collegeCutoffFilter, collegeBranchFilter, collegeLocationFilter]);
 
   const internshipRecommendations = useMemo(() => {
     return computeInternshipGuidance(studentProfile, skills, internships);
@@ -512,29 +561,137 @@ export default function RecommendationsPage() {
 
             {/* 2. COLLEGES GUIDANCE TAB (Feature 2) */}
             {activeTab === "college" && (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 <div className="p-4 rounded-xl bg-indigo-50/50 border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-indigo-900">
                   <span>
-                    Showing <strong>{collegeRecommendations.length}</strong> accredited colleges scored against your entrance percentile and branch preference.
+                    Showing <strong>{filteredCollegeRecommendations.length}</strong> of <strong>{collegeRecommendations.length}</strong> accredited colleges scored against your entrance percentile and branch preference.
                   </span>
                   <Link href="/colleges" className="font-bold underline hover:text-indigo-950">
                     Browse Colleges Directory &rarr;
                   </Link>
                 </div>
 
-                {collegeRecommendations.length > 0 ? (
+                {/* College Recommendations Cutoff & Facet Filters */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-white rounded-xl border border-[#EAEAEA]">
+                  {/* Status Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-slate-500 font-medium mr-1 text-[11px] uppercase tracking-wider">Cutoff:</span>
+                    <button
+                      onClick={() => setCollegeCutoffFilter("all")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition text-xs ${
+                        collegeCutoffFilter === "all"
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      All ({collegeRecommendations.length})
+                    </button>
+                    <button
+                      onClick={() => setCollegeCutoffFilter("Cutoff compatible")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition text-xs flex items-center gap-1 ${
+                        collegeCutoffFilter === "Cutoff compatible"
+                          ? "bg-emerald-600 text-white shadow-xs"
+                          : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                      }`}
+                    >
+                      <span>✓ Compatible</span>
+                      <span className="text-[10px] opacity-80">({collegeFilterOptions.compatibleCount})</span>
+                    </button>
+                    <button
+                      onClick={() => setCollegeCutoffFilter("Cutoff not met")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition text-xs flex items-center gap-1 ${
+                        collegeCutoffFilter === "Cutoff not met"
+                          ? "bg-amber-600 text-white shadow-xs"
+                          : "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
+                      }`}
+                    >
+                      <span>⚠ Cutoff not met</span>
+                      <span className="text-[10px] opacity-80">({collegeFilterOptions.notMetCount})</span>
+                    </button>
+                    <button
+                      onClick={() => setCollegeCutoffFilter("Cutoff unavailable")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition text-xs flex items-center gap-1 ${
+                        collegeCutoffFilter === "Cutoff unavailable"
+                          ? "bg-slate-700 text-white shadow-xs"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200"
+                      }`}
+                    >
+                      <span>○ Unavailable</span>
+                      <span className="text-[10px] opacity-80">({collegeFilterOptions.unavailableCount})</span>
+                    </button>
+                  </div>
+
+                  {/* Branch & Location Dropdowns */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {collegeFilterOptions.branches.length > 0 && (
+                      <select
+                        aria-label="Filter by target program"
+                        value={collegeBranchFilter}
+                        onChange={(e) => setCollegeBranchFilter(e.target.value)}
+                        className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500 max-w-[200px] truncate"
+                      >
+                        <option value="all">All Programs ({collegeFilterOptions.branches.length})</option>
+                        {collegeFilterOptions.branches.map((b) => (
+                          <option key={b} value={b}>{b}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {collegeFilterOptions.locations.length > 0 && (
+                      <select
+                        aria-label="Filter by location"
+                        value={collegeLocationFilter}
+                        onChange={(e) => setCollegeLocationFilter(e.target.value)}
+                        className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        <option value="all">All Locations ({collegeFilterOptions.locations.length})</option>
+                        {collegeFilterOptions.locations.map((loc) => (
+                          <option key={loc} value={loc}>{loc}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {(collegeCutoffFilter !== "all" || collegeBranchFilter !== "all" || collegeLocationFilter !== "all") && (
+                      <button
+                        onClick={() => {
+                          setCollegeCutoffFilter("all");
+                          setCollegeBranchFilter("all");
+                          setCollegeLocationFilter("all");
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 underline"
+                      >
+                        Reset filters
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {filteredCollegeRecommendations.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {collegeRecommendations.map((item) => (
+                    {filteredCollegeRecommendations.map((item) => (
                       <RecommendationCard key={`col-${item.id}`} item={item} />
                     ))}
                   </div>
                 ) : (
                   <EmptyState
                     icon={<Building2 className="w-8 h-8" />}
-                    title="No College Recommendations"
-                    description="Update your preferred branch or entrance score in your profile to generate matches."
-                    actionText="Update Profile"
-                    actionHref="/profile"
+                    title="No College Recommendations Found"
+                    description={
+                      collegeRecommendations.length === 0
+                        ? "Update your preferred branch or entrance score in your profile to generate matches."
+                        : "No colleges match the active filter criteria. Try resetting the filters."
+                    }
+                    actionText={collegeRecommendations.length === 0 ? "Update Profile" : "Reset Filters"}
+                    actionHref={collegeRecommendations.length === 0 ? "/profile" : undefined}
+                    onAction={
+                      collegeRecommendations.length > 0
+                        ? () => {
+                            setCollegeCutoffFilter("all");
+                            setCollegeBranchFilter("all");
+                            setCollegeLocationFilter("all");
+                          }
+                        : undefined
+                    }
                   />
                 )}
               </div>

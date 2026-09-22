@@ -1,5 +1,8 @@
 import {
   College,
+  CollegeCourse,
+  CollegeCutoff,
+  CutoffUnit,
   Internship,
   Placement,
   Profile,
@@ -38,6 +41,21 @@ export function normalizeSkills(skills: string[]): {
   });
 
   return { normalized, displayMap };
+}
+ 
+/**
+ * Normalizes entrance examination names into canonical search keys.
+ * Used for strict exam-to-exam matching.
+ */
+export function normalizeExamKey(examStr: string): string {
+  if (!examStr) return "";
+  const norm = examStr.toLowerCase().replace(/[-\s_]/g, "");
+  if (norm.includes("mht") || norm === "cet" || norm.includes("mhtcet")) return "mht-cet";
+  if (norm.includes("jeeadvanced") || norm.includes("jeeadv")) return "jee-advanced";
+  if (norm.includes("jeemain") || norm === "jee") return "jee-main";
+  if (norm.includes("law") || norm.includes("clat")) return "mh-cet-law";
+  if (norm.includes("nata") || norm.includes("arch")) return "nata";
+  return norm;
 }
 
 /**
@@ -108,96 +126,594 @@ export function computeAIGuidanceOverview(
 /**
  * Feature 2: Computes Personalized College Guidance with factor breakdowns & cutoffs.
  */
+/**
+ * Helper to determine technical skills associated with an academic discipline/course.
+ */
+function getDomainRelevantSkills(courseName: string, stream: string): string[] {
+  const c = `${courseName} ${stream}`.toLowerCase();
+  if (c.includes("computer") || c.includes("software") || c.includes("information technology") || c.includes("it") || c.includes("cse")) {
+    return ["python", "java", "c++", "javascript", "typescript", "react", "sql", "data structures", "git", "docker", "cloud computing", "node.js"];
+  }
+  if (c.includes("ai") || c.includes("data") || c.includes("machine learning") || c.includes("artificial intelligence")) {
+    return ["python", "sql", "machine learning", "data structures", "deep learning", "r", "pandas", "numpy", "statistics"];
+  }
+  if (c.includes("electronics") || c.includes("telecommunication") || c.includes("e&tc") || c.includes("etc") || c.includes("electrical")) {
+    return ["c", "c++", "embedded systems", "iot", "matlab", "vlsi", "pcb", "microcontrollers", "circuits"];
+  }
+  if (c.includes("mechanical") || c.includes("automobile") || c.includes("mechatronics")) {
+    return ["cad", "solidworks", "matlab", "ansys", "autocad", "thermodynamics", "manufacturing", "c++"];
+  }
+  if (c.includes("civil") || c.includes("structural")) {
+    return ["autocad", "staad pro", "revit", "gis", "surveying", "construction management"];
+  }
+  if (c.includes("management") || c.includes("mba") || c.includes("bba")) {
+    return ["financial analysis", "marketing", "business strategy", "excel", "leadership", "project management"];
+  }
+  if (c.includes("law") || c.includes("legal")) {
+    return ["legal research", "constitutional law", "corporate law", "arbitration", "drafting", "advocacy"];
+  }
+  if (c.includes("design")) {
+    return ["figma", "ui/ux", "user research", "prototyping", "adobe illustrator", "photoshop", "wireframing"];
+  }
+  return ["problem solving", "analytical thinking", "communication", "teamwork", "research"];
+}
+
+/**
+ * Feature 2: Computes Personalized College Guidance with real Supabase cutoff matching.
+ * 
+ * FINAL RECOMMENDATION SCORING FORMULA:
+ * -------------------------------------------------------------
+ * 1. When Cutoff Data is Available and Student has Valid Score:
+ *    - Cutoff Compatibility:   35% (scaled based on difference between student score and published cutoff)
+ *    - Academic Alignment:     25% (NAAC grade accreditation, institutional placement track record, student CGPA)
+ *    - Program/Domain Match:   20% (direct branch match: 96%, complementary/related: 85%, general: 70%)
+ *    - Technical Skills Match: 10% (overlap of student's skills with the program's technical curriculum)
+ *    - Location Preference:    10% (geographic alignment with student's preferred city or state)
+ *    Total = 100%
+ * 
+ * 2. When Cutoff Data is Unavailable (Missing cutoff, missing student score, or exam mismatch):
+ *    - Cutoff factor is NOT treated as a failed cutoff (score is never zeroed).
+ *    - The remaining 4 factors are renormalized to sum to 100%:
+ *      - Academic Alignment:     25 / 65 ≈ 38.46%
+ *      - Program/Domain Match:   20 / 65 ≈ 30.77%
+ *      - Technical Skills Match: 10 / 65 ≈ 15.38%
+ *      - Location Preference:    10 / 65 ≈ 15.38%
+ *    Total = 100%
+ * -------------------------------------------------------------
+ * Never creates predictive claims (e.g. "90% chance"). All guidance uses factual statuses:
+ * "Cutoff compatible", "Cutoff not met", or "Cutoff unavailable".
+ */
 export function computeCollegeGuidance(
   studentProfile: StudentProfile | null,
-  colleges: College[] = []
+  colleges: College[] = [],
+  skills: string[] = []
 ): RecommendationItem[] {
   const targetBranch = studentProfile?.preferred_branch?.toLowerCase().trim() || "";
   const targetLocation = studentProfile?.preferred_location?.toLowerCase().trim() || "";
-  const entranceScore = studentProfile?.entrance_score ?? 0;
+  const studentExam = studentProfile?.entrance_exam?.trim() || "";
+  const studentExamKey = studentExam ? normalizeExamKey(studentExam) : "";
+  const studentCategoryRaw = studentProfile?.category?.trim().toUpperCase() || "";
+
+  // Normalize student score
+  const studentScore =
+    studentProfile?.entrance_score !== null &&
+    studentProfile?.entrance_score !== undefined &&
+    studentProfile.entrance_score > 0
+      ? Number(studentProfile.entrance_score)
+      : null;
+
+  // Normalized skill set for skill alignment evaluation
+  const { normalized: studentSkillsLower } = normalizeSkills(skills);
 
   return colleges.map((college) => {
     const reasons: string[] = [];
-    let academicMatch = 60;
-    let branchMatch = 50;
-    let locationMatch = 50;
-
-    const courseLower = college.course?.toLowerCase() || "";
     const locLower = college.location?.toLowerCase() || "";
     const stateLower = college.state?.toLowerCase() || "";
 
-    // 1. Entrance cutoff match
-    const estimatedCutoff =
-      college.college_type?.includes("National") || college.name.includes("IIT") || college.name.includes("BITS")
-        ? 94.0
-        : college.college_type?.includes("State") || college.name.includes("COEP") || college.name.includes("IIIT")
-        ? 88.0
-        : 80.0;
+    // -------------------------------------------------------------
+    // STEP 1: Identify Best-Matching Program / Course
+    // -------------------------------------------------------------
+    let matchedCourseName = "";
+    let matchedStream = college.primary_stream || "Technology";
+    let matchedCourseIntake = 0;
+    let matchedCutoffRecord: CollegeCutoff | null = null;
+    let branchMatchScore = 65;
+    let matchedCourseObject: CollegeCourse | null = null;
 
-    if (entranceScore > 0) {
-      if (entranceScore >= estimatedCutoff) {
-        academicMatch = 95;
-        reasons.push(
-          `Entrance score of ${entranceScore} satisfies the estimated admission cutoff (${estimatedCutoff}+)`
-        );
+    if (college.courses && college.courses.length > 0) {
+      // Find course aligning with student's preferred branch
+      const rankedCourses = college.courses.map((crs) => {
+        const cName = crs.course_name.toLowerCase();
+        const cStream = crs.stream.toLowerCase();
+        let rank = 0;
+
+        if (targetBranch) {
+          if (cName === targetBranch) {
+            rank = 100;
+          } else if (cName.includes(targetBranch) || targetBranch.includes(cName)) {
+            rank = 90;
+          } else if (
+            (targetBranch.includes("computer") || targetBranch.includes("cse")) &&
+            (cName.includes("computer") || cName.includes("cse") || cName.includes("information technology") || cName.includes("it"))
+          ) {
+            rank = 88;
+          } else if (
+            (targetBranch.includes("data") || targetBranch.includes("ai")) &&
+            (cName.includes("ai") || cName.includes("data") || cName.includes("machine learning"))
+          ) {
+            rank = 86;
+          } else if (
+            (targetBranch.includes("electronics") || targetBranch.includes("telecom")) &&
+            (cName.includes("telecommunication") || cName.includes("e&tc") || cName.includes("etc") || cName.includes("electronics"))
+          ) {
+            rank = 86;
+          } else if (targetBranch.includes("mechanical") && cName.includes("mechanical")) {
+            rank = 85;
+          } else if (targetBranch.includes("electrical") && cName.includes("electrical")) {
+            rank = 85;
+          } else if (targetBranch.includes("chemical") && cName.includes("chemical")) {
+            rank = 84;
+          } else if (targetBranch.includes("civil") && cName.includes("civil")) {
+            rank = 84;
+          } else if (targetBranch.includes("law") && (cStream.includes("law") || cName.includes("law") || cName.includes("llb"))) {
+            rank = 88;
+          } else if (targetBranch.includes("design") && (cStream.includes("design") || cName.includes("design") || cName.includes("bdes"))) {
+            rank = 88;
+          } else if (targetBranch.includes("architecture") && (cStream.includes("architecture") || cName.includes("arch") || cName.includes("barch"))) {
+            rank = 88;
+          } else if (cStream === targetBranch || targetBranch.includes(cStream)) {
+            rank = 75;
+          }
+        }
+
+        // Prioritize courses with real cutoffs matching student's exam if rank tie
+        const studentExamCutoff = studentExamKey && crs.cutoffs && crs.cutoffs.length > 0
+          ? crs.cutoffs.find(c => normalizeExamKey(c.exam) === studentExamKey)
+          : null;
+        const hasCutoff = crs.cutoffs && crs.cutoffs.length > 0;
+        return { course: crs, rank: rank + (studentExamCutoff ? 4 : hasCutoff ? 1 : 0) };
+      });
+
+      rankedCourses.sort((a, b) => b.rank - a.rank);
+      const topCourse = rankedCourses[0].course;
+      matchedCourseObject = topCourse;
+      const topRank = rankedCourses[0].rank;
+
+      matchedCourseName = topCourse.course_name;
+      matchedStream = topCourse.stream || college.primary_stream || "Technology";
+      matchedCourseIntake = topCourse.intake || 0;
+
+      if (topRank >= 80) {
+        branchMatchScore = 96;
+        reasons.push(`Direct branch alignment with ${matchedCourseName}${matchedCourseIntake > 0 ? ` (${matchedCourseIntake} seats)` : ""}`);
+      } else if (topRank >= 70) {
+        branchMatchScore = 84;
+        reasons.push(`Complementary academic curriculum in ${matchedCourseName}`);
       } else {
-        academicMatch = Math.max(50, Math.round((entranceScore / estimatedCutoff) * 88));
-        reasons.push(
-          `Entrance score (${entranceScore}) is close to historical cutoff benchmark (${estimatedCutoff})`
-        );
+        branchMatchScore = 70;
+        reasons.push(`Approved undergraduate degree in ${matchedCourseName}`);
+      }
+
+      if (topCourse.cutoffs && topCourse.cutoffs.length > 0) {
+        const cLower = (college.name || "").toLowerCase();
+        const validCutoffs = topCourse.cutoffs.filter((c) => {
+          if (c.verification_status === "INVALID") return false;
+          if ((cLower.includes("army institute") || cLower.includes("ait")) && c.exam.toUpperCase().includes("MHT")) return false;
+          if (cLower.includes("symbiosis law") && c.exam.toUpperCase().includes("LAW")) return false;
+          if (cLower.includes("bharati vidyapeeth new law") && c.exam.toUpperCase().includes("LAW")) return false;
+          if ((cLower.includes("birla institute") || cLower.includes("bits")) && !c.exam.toUpperCase().includes("BITSAT")) return false;
+          if ((cLower.includes("vellore institute") || cLower.includes("vit")) && !c.exam.toUpperCase().includes("VITEEE")) return false;
+          if ((cLower.includes("rvce") || cLower.includes("r.v. college") || cLower.includes("rv college")) && !c.exam.toUpperCase().includes("KCET") && !c.exam.toUpperCase().includes("COMEDK")) return false;
+          if ((cLower.includes("indian institute of tech") || cLower.includes("iit")) && !c.exam.toUpperCase().includes("ADVANCED")) return false;
+          return true;
+        });
+
+        if (studentExamKey) {
+          matchedCutoffRecord = validCutoffs.find((c) => normalizeExamKey(c.exam) === studentExamKey) || null;
+        } else {
+          matchedCutoffRecord = validCutoffs[0] || null;
+        }
+      }
+    } else if (college.programs && college.programs.length > 0) {
+      // Check college.programs fallback
+      const matchingProg = college.programs.find(
+        (p) =>
+          targetBranch &&
+          (p.toLowerCase().includes(targetBranch) ||
+            targetBranch.includes(p.toLowerCase()) ||
+            (targetBranch.includes("computer") && (p.toLowerCase() === "cse" || p.toLowerCase() === "it")))
+      );
+      matchedCourseName = matchingProg || college.programs[0];
+      branchMatchScore = matchingProg ? 92 : 72;
+      reasons.push(`Program offered: ${matchedCourseName}`);
+    } else if (college.course) {
+      matchedCourseName = college.course;
+      branchMatchScore = targetBranch && college.course.toLowerCase().includes(targetBranch) ? 90 : 70;
+      reasons.push(`Curriculum offered: ${college.course}`);
+    } else {
+      matchedCourseName = "Undergraduate Degree Program";
+      branchMatchScore = 65;
+    }
+
+    // Career goal alignment bonus
+    if (studentProfile?.career_goal) {
+      const cgLower = studentProfile.career_goal.toLowerCase();
+      if (
+        (cgLower.includes("software") || cgLower.includes("developer") || cgLower.includes("engineer")) &&
+        (matchedCourseName.toLowerCase().includes("computer") || matchedCourseName.toLowerCase().includes("it"))
+      ) {
+        branchMatchScore = Math.min(100, branchMatchScore + 4);
+        reasons.push(`Strong career alignment with your goal: "${studentProfile.career_goal}"`);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // STEP 2: Cutoff Matching & Exam Verification
+    // -------------------------------------------------------------
+    let cutoffStatus: "Cutoff compatible" | "Cutoff not met" | "Cutoff unavailable" = "Cutoff unavailable";
+    let cutoffValue: number | null = null;
+    let categoryEvaluated = "OPEN (default)";
+    let cutoffExam = matchedCutoffRecord?.exam || (studentExam ? (studentProfile?.entrance_exam || "MHT-CET") : (college.entrance_exam || "MHT-CET"));
+    let scoreDifference: number | null = null;
+    let cutoffMatchScore: number | null = null;
+    let relevantCutoffText = "Cutoff: Not available";
+    const cutoffUnit: CutoffUnit = matchedCutoffRecord?.cutoff_unit || "percentile";
+
+    // Strict Exam Matching & College Specifics
+    const isEngineeringStream = matchedStream.toLowerCase().includes("engineering") || matchedStream.toLowerCase().includes("technology");
+    const collegeNameLower = (college.name || "").toLowerCase();
+    const isBITS = collegeNameLower.includes("birla institute") || collegeNameLower.includes("bits");
+    const isVIT = collegeNameLower.includes("vellore institute") || collegeNameLower.includes("vit");
+    const isIIITH = collegeNameLower.includes("international institute of info") || collegeNameLower.includes("iiit");
+    const isDTU = collegeNameLower.includes("delhi technological") || collegeNameLower.includes("dtu");
+    const isRVCE = collegeNameLower.includes("rvce") || collegeNameLower.includes("r.v. college") || collegeNameLower.includes("rv college");
+    const isIIT = collegeNameLower.includes("indian institute of tech") || collegeNameLower.includes("iit bombay");
+    const isAIT = collegeNameLower.includes("army institute of technology") || collegeNameLower.includes("ait");
+    const isSLS = collegeNameLower.includes("symbiosis law");
+    const isBVP = collegeNameLower.includes("bharati vidyapeeth new law");
+
+    const acceptedExams: string[] = (
+      (matchedCourseObject?.accepted_exams && matchedCourseObject.accepted_exams.length > 0)
+        ? matchedCourseObject.accepted_exams
+        : (college.accepted_exams && college.accepted_exams.length > 0)
+        ? college.accepted_exams
+        : isBITS ? ["BITSAT"]
+        : isVIT ? ["VITEEE"]
+        : isIIITH ? ["JEE Main", "UGEE"]
+        : isDTU ? ["JEE Main"]
+        : isRVCE ? ["KCET", "COMEDK UGET"]
+        : isIIT ? ["JEE Advanced"]
+        : isAIT ? ["JEE Main"]
+        : isSLS ? ["SLAT"]
+        : isBVP ? ["BVP CET Law"]
+        : isEngineeringStream ? ["MHT-CET", "JEE Main"]
+        : ["MHT-CET"]
+    );
+    const collegeAcceptsStudentExam = studentExamKey
+      ? acceptedExams.some((e: string) => normalizeExamKey(e) === studentExamKey)
+      : true;
+
+    // Invalidate matchedCutoffRecord if marked INVALID or belongs to misattributed combination
+    if (matchedCutoffRecord && (
+      matchedCutoffRecord.verification_status === "INVALID" ||
+      (isAIT && matchedCutoffRecord.exam.toUpperCase().includes("MHT")) ||
+      (isSLS && matchedCutoffRecord.exam.toUpperCase().includes("LAW")) ||
+      (isBVP && matchedCutoffRecord.exam.toUpperCase().includes("LAW")) ||
+      (isBITS && !matchedCutoffRecord.exam.toUpperCase().includes("BITSAT")) ||
+      (isVIT && !matchedCutoffRecord.exam.toUpperCase().includes("VITEEE")) ||
+      (isRVCE && !matchedCutoffRecord.exam.toUpperCase().includes("KCET") && !matchedCutoffRecord.exam.toUpperCase().includes("COMEDK"))
+    )) {
+      matchedCutoffRecord = null;
+    }
+
+    if (matchedCutoffRecord) {
+      const rec = matchedCutoffRecord as unknown as Record<string, unknown>;
+      const valObc = rec.obc !== undefined && rec.obc !== null ? Number(rec.obc) : (rec.cutoff_obc !== undefined && rec.cutoff_obc !== null ? Number(rec.cutoff_obc) : null);
+      const valSc = rec.sc !== undefined && rec.sc !== null ? Number(rec.sc) : (rec.cutoff_sc !== undefined && rec.cutoff_sc !== null ? Number(rec.cutoff_sc) : null);
+      const valSt = rec.st !== undefined && rec.st !== null ? Number(rec.st) : (rec.cutoff_st !== undefined && rec.cutoff_st !== null ? Number(rec.cutoff_st) : null);
+      const valOpen = rec.open !== undefined && rec.open !== null ? Number(rec.open) : (rec.cutoff_open !== undefined && rec.cutoff_open !== null ? Number(rec.cutoff_open) : null);
+
+      // Determine applicable category cutoff
+      if (studentCategoryRaw === "OBC" && valObc !== null) {
+        cutoffValue = valObc;
+        categoryEvaluated = "OBC";
+      } else if (studentCategoryRaw === "SC" && valSc !== null) {
+        cutoffValue = valSc;
+        categoryEvaluated = "SC";
+      } else if (studentCategoryRaw === "ST" && valSt !== null) {
+        cutoffValue = valSt;
+        categoryEvaluated = "ST";
+      } else if (valOpen !== null) {
+        cutoffValue = valOpen;
+        categoryEvaluated = studentCategoryRaw === "OPEN" ? "OPEN" : "OPEN (default)";
+      }
+
+      cutoffExam = matchedCutoffRecord.exam;
+    }
+
+    // Determine 3-tier status and calculate cutoffMatchScore with unit awareness
+    if (cutoffValue !== null && studentScore !== null && matchedCutoffRecord) {
+      if (cutoffUnit === "rank") {
+        // Lower rank is better (e.g. Rank 1200 is better than Closing Rank 2000)
+        const isCompatible = studentScore <= cutoffValue;
+        scoreDifference = cutoffValue - studentScore;
+        relevantCutoffText = `${cutoffExam} (${categoryEvaluated}: AIR ${cutoffValue})`;
+
+        if (isCompatible) {
+          cutoffStatus = "Cutoff compatible";
+          const rankSurplus = Math.max(0, cutoffValue - studentScore);
+          cutoffMatchScore = Math.min(100, Math.round(92 + Math.min(rankSurplus / 200, 8)));
+          reasons.push(
+            `Your ${cutoffExam} rank (${studentScore}) meets published ${categoryEvaluated} closing rank (AIR ${cutoffValue}) for ${matchedCourseName}`
+          );
+        } else {
+          cutoffStatus = "Cutoff not met";
+          const rankDeficit = studentScore - cutoffValue;
+          if (rankDeficit <= 500) {
+            cutoffMatchScore = Math.round(82 + ((500 - rankDeficit) / 500) * 8);
+            reasons.push(
+              `Published ${categoryEvaluated} closing rank is AIR ${cutoffValue} (Your rank: ${studentScore}) — competitive choice`
+            );
+          } else if (rankDeficit <= 2000) {
+            cutoffMatchScore = Math.round(68 + ((2000 - rankDeficit) / 1500) * 12);
+            reasons.push(
+              `Published ${categoryEvaluated} closing rank is AIR ${cutoffValue} (Your rank: ${studentScore}) — reach choice`
+            );
+          } else {
+            cutoffMatchScore = Math.max(40, Math.round(65 - Math.min(rankDeficit / 200, 25)));
+            reasons.push(
+              `Published ${categoryEvaluated} closing rank is AIR ${cutoffValue} (Your rank: ${studentScore}) — ambitious reach`
+            );
+          }
+        }
+      } else {
+        // Percentile / score unit (higher is better)
+        const isCompatible = studentScore >= cutoffValue;
+        scoreDifference = Number((studentScore - cutoffValue).toFixed(2));
+        let unitSuffix = "%ile";
+        if (cutoffUnit === "score" || cutoffUnit === "marks" || cutoffUnit === "marks_out_of_200" || cutoffUnit === "marks_out_of_150" || cutoffUnit === "marks_out_of_390") {
+          unitSuffix = cutoffExam.toUpperCase().includes("NATA") ? " / 200 marks" : cutoffExam.toUpperCase().includes("LAW") ? " / 150 marks" : cutoffExam.toUpperCase().includes("BITSAT") ? " / 390 marks" : " marks";
+        }
+        relevantCutoffText = `${cutoffExam} (${categoryEvaluated}: ${cutoffValue}${unitSuffix})`;
+
+        if (isCompatible) {
+          cutoffStatus = "Cutoff compatible";
+          const surplus = Math.min(scoreDifference, 5);
+          cutoffMatchScore = Math.min(100, Math.round(92 + surplus * 1.6));
+          reasons.push(
+            `Your ${cutoffExam} score (${studentScore}${unitSuffix}) is cutoff compatible with published ${categoryEvaluated} benchmark (${cutoffValue}${unitSuffix}) for ${matchedCourseName}`
+          );
+        } else {
+          cutoffStatus = "Cutoff not met";
+          const deficit = Math.abs(scoreDifference);
+          if (deficit <= 3.0) {
+            cutoffMatchScore = Math.round(82 + ((3.0 - deficit) / 3.0) * 8);
+            reasons.push(
+              `Published ${categoryEvaluated} cutoff is ${cutoffValue}${unitSuffix} (${deficit.toFixed(1)}${unitSuffix} above your score of ${studentScore}${unitSuffix}) — competitive choice`
+            );
+          } else if (deficit <= 8.0) {
+            cutoffMatchScore = Math.round(68 + ((8.0 - deficit) / 5.0) * 12);
+            reasons.push(
+              `Published ${categoryEvaluated} cutoff is ${cutoffValue}${unitSuffix} (${deficit.toFixed(1)}${unitSuffix} reach against score ${studentScore}${unitSuffix})`
+            );
+          } else {
+            cutoffMatchScore = Math.max(40, Math.round(65 - Math.min(deficit, 25)));
+            reasons.push(
+              `Published ${categoryEvaluated} cutoff is ${cutoffValue}${unitSuffix} (Score: ${studentScore}${unitSuffix}) — ambitious academic reach`
+            );
+          }
+        }
       }
     } else {
-      reasons.push(`Accredited curriculum aligned with ${college.entrance_exam || "National Entrance Exams"}`);
+      // Cutoff Unavailable: missing cutoff in dataset, missing student score, or exam mismatch
+      cutoffStatus = "Cutoff unavailable";
+      cutoffMatchScore = null; // Excluded from weighted calculation and renormalized
+
+      if (isBITS && studentExamKey && (studentExamKey.includes("mht") || studentExamKey.includes("jee"))) {
+        relevantCutoffText = "MHT-CET / JEE Main not accepted (Requires BITSAT Score out of 390)";
+        reasons.push(
+          "BITS Pilani admits students strictly via BITS Admission Portal direct counselling based on BITSAT score (out of 390 marks); MHT-CET and JEE Main are not accepted."
+        );
+      } else if (isVIT && studentExamKey && (studentExamKey.includes("mht") || studentExamKey.includes("jee"))) {
+        relevantCutoffText = "MHT-CET / JEE Main not accepted (Requires VITEEE Rank)";
+        reasons.push(
+          "Vellore Institute of Technology admits B.Tech students strictly via VIT Online Counselling based on VITEEE rank; MHT-CET and JEE Main are not accepted for regular B.Tech seats."
+        );
+      } else if (isIIITH && studentExamKey && studentExamKey.includes("mht")) {
+        relevantCutoffText = "MHT-CET not accepted (Requires JEE Main Percentile or UGEE)";
+        reasons.push(
+          "IIIT Hyderabad does not participate in Maharashtra CAP or accept MHT-CET; admissions require JEE Main overall percentile or UGEE exam via IIIT-H Admissions Portal."
+        );
+      } else if (isDTU && studentExamKey && studentExamKey.includes("mht")) {
+        relevantCutoffText = "MHT-CET not accepted (Requires JEE Main CRL Rank via JAC Delhi)";
+        reasons.push(
+          "Delhi Technological University does not admit students via MHT-CET; admissions are conducted strictly via JAC Delhi counselling based on JEE Main Common Rank List (CRL)."
+        );
+      } else if (isRVCE && studentExamKey && studentExamKey.includes("mht")) {
+        relevantCutoffText = "MHT-CET not accepted (Requires KCET or COMEDK UGET Rank)";
+        reasons.push(
+          "RV College of Engineering does not admit students via MHT-CET; admissions are conducted via KEA KCET counselling (Karnataka domicile) or COMEDK UGET (All India quota)."
+        );
+      } else if (isIIT && studentExamKey && !studentExamKey.includes("advanced")) {
+        relevantCutoffText = "Requires JEE Advanced AIR via JoSAA";
+        reasons.push(
+          "IIT Bombay admits undergraduate engineering students strictly through JoSAA counselling based on JEE Advanced All India Rank (AIR); JEE Main or MHT-CET are not accepted for final seat allocation."
+        );
+      } else if (isAIT && studentExamKey && studentExamKey.includes("mht")) {
+        relevantCutoffText = "MHT-CET not accepted (Requires JEE Main AIR for Army wards)";
+        reasons.push(
+          "Army Institute of Technology does not admit students via MHT-CET; admissions are strictly via JEE Main All India Rank (AIR) for Army personnel wards."
+        );
+      } else if (isSLS && studentExamKey && studentExamKey.includes("law")) {
+        relevantCutoffText = "MH CET Law not accepted (Admissions via SLAT)";
+        reasons.push(
+          "Symbiosis Law School Pune admits students via SLAT (Symbiosis Law Admission Test), not MH CET Law."
+        );
+      } else if (isBVP && studentExamKey && studentExamKey.includes("law")) {
+        relevantCutoffText = "MH CET Law not accepted (Admissions via BVP CET Law)";
+        reasons.push(
+          "Bharati Vidyapeeth New Law College admits students primarily via BVP CET Law, not MH CET Law."
+        );
+      } else if (studentExamKey && !matchedCutoffRecord) {
+        if (!collegeAcceptsStudentExam) {
+          relevantCutoffText = `${studentProfile?.entrance_exam || "Exam"} (Not accepted for this program)`;
+          reasons.push(
+            `Program accepts ${acceptedExams.join(", ")}, which does not match your profile exam (${studentProfile?.entrance_exam}); evaluated on institutional alignment`
+          );
+        } else {
+          relevantCutoffText = `${studentProfile?.entrance_exam || "Exam"} cutoff: Not available in verified dataset`;
+          reasons.push(
+            `${studentProfile?.entrance_exam || "Exam"} cutoff not available in verified dataset for ${matchedCourseName}; evaluated on academic and institutional alignment`
+          );
+        }
+      } else if (!matchedCutoffRecord) {
+        relevantCutoffText = "Cutoff: Not available in verified dataset";
+        reasons.push(
+          `Cutoff: Not available in verified dataset (Evaluated on academic and institutional alignment for ${matchedCourseName})`
+        );
+      } else if (studentScore === null) {
+        let unitStr = `${cutoffValue}%ile`;
+        if (cutoffUnit === "rank") unitStr = `AIR ${cutoffValue}`;
+        else if (cutoffUnit === "score" || cutoffUnit === "marks") {
+          unitStr = cutoffExam.toUpperCase().includes("NATA") ? `${cutoffValue} / 200 marks` : cutoffExam.toUpperCase().includes("LAW") ? `${cutoffValue} / 150 marks` : cutoffExam.toUpperCase().includes("BITSAT") ? `${cutoffValue} / 390 marks` : `${cutoffValue} marks`;
+        }
+        relevantCutoffText = `${cutoffExam} (${categoryEvaluated}: ${unitStr})`;
+        reasons.push(
+          `Published ${categoryEvaluated} cutoff benchmark: ${unitStr} (Enter entrance score to evaluate cutoff compatibility)`
+        );
+      } else {
+        relevantCutoffText = `${cutoffExam} (${categoryEvaluated}: ${cutoffValue}%ile)`;
+        reasons.push(
+          `Cutoff benchmark available for ${cutoffExam}; enter corresponding score to evaluate compatibility`
+        );
+      }
     }
 
-    // 2. Branch match
-    if (targetBranch && (courseLower.includes(targetBranch) || targetBranch.includes(courseLower))) {
-      branchMatch = 95;
-      reasons.push(`Direct branch alignment with your target stream (${college.course})`);
-    } else if (targetBranch && (courseLower.includes("computer") || courseLower.includes("technology"))) {
-      branchMatch = 75;
-      reasons.push(`Complementary technology curriculum in ${college.course}`);
-    }
-
-    // 3. Location match
-    if (targetLocation && (locLower.includes(targetLocation) || stateLower.includes(targetLocation))) {
-      locationMatch = 92;
-      reasons.push(
-        `Located in your preferred region (${college.location ? `${college.location}, ` : ""}${college.state})`
-      );
+    // -------------------------------------------------------------
+    // STEP 3: Academic / Institutional Alignment
+    // -------------------------------------------------------------
+    let academicMatchScore = 75;
+    if (college.naac_grade) {
+      if (college.naac_grade.includes("A++")) academicMatchScore = 96;
+      else if (college.naac_grade.includes("A+")) academicMatchScore = 92;
+      else if (college.naac_grade.startsWith("A")) academicMatchScore = 88;
+      else academicMatchScore = 80;
+      reasons.push(`Accredited institutional standard with NAAC Grade ${college.naac_grade}`);
     } else {
-      locationMatch = 65;
+      academicMatchScore = 76;
     }
 
-    // 4. Institutional placement factor
-    if (college.placement_rate && college.placement_rate >= 90) {
+    if (college.placement_rate && college.placement_rate >= 85) {
+      academicMatchScore = Math.min(100, academicMatchScore + 4);
       reasons.push(`Proven ${college.placement_rate}% campus placement track record`);
     }
 
-    // Weighted composite match score
-    const compositeScore = Math.round(
-      academicMatch * 0.4 + branchMatch * 0.35 + locationMatch * 0.25
-    );
-    const finalScore = Math.min(Math.max(compositeScore, 60), 98);
+    // -------------------------------------------------------------
+    // STEP 4: Technical Skills Alignment
+    // -------------------------------------------------------------
+    const domainSkills = getDomainRelevantSkills(matchedCourseName, matchedStream);
+    const matchedSkills: string[] = [];
+    domainSkills.forEach((ds) => {
+      if (studentSkillsLower.has(ds.toLowerCase())) {
+        matchedSkills.push(ds);
+      }
+    });
 
-    const relevantCutoff = `${college.entrance_exam || "Merit"} (Est. Cutoff: ${estimatedCutoff}%ile)`;
+    let skillMatchScore = 75;
+    if (skills.length > 0) {
+      if (matchedSkills.length >= 3) {
+        skillMatchScore = 95;
+        reasons.push(`Strong skills alignment with ${matchedCourseName} curriculum (${matchedSkills.slice(0, 3).join(", ")})`);
+      } else if (matchedSkills.length >= 1) {
+        skillMatchScore = 85;
+        reasons.push(`Relevant core competencies in ${matchedSkills.join(", ")}`);
+      } else {
+        skillMatchScore = 72;
+      }
+    } else {
+      skillMatchScore = 75; // Neutral default for students with no skills listed yet
+    }
+
+    // -------------------------------------------------------------
+    // STEP 5: Location Preference
+    // -------------------------------------------------------------
+    let locationMatchScore = 75;
+    if (targetLocation) {
+      if (locLower.includes(targetLocation) || targetLocation.includes(locLower)) {
+        locationMatchScore = 96;
+        reasons.push(`Located in your preferred region (${college.location ? `${college.location}, ` : ""}${college.state || "Maharashtra"})`);
+      } else if (stateLower.includes(targetLocation) || targetLocation.includes(stateLower)) {
+        locationMatchScore = 85;
+        reasons.push(`Located in ${college.state || "Maharashtra"} State`);
+      } else {
+        locationMatchScore = 65;
+      }
+    } else {
+      locationMatchScore = 80; // Neutral default
+    }
+
+    // -------------------------------------------------------------
+    // STEP 6: Composite Weighted Score & Renormalization
+    // -------------------------------------------------------------
+    let compositeScore: number;
+    if (cutoffMatchScore !== null) {
+      // Full 5-factor weighted formula (Cutoff available)
+      compositeScore = Math.round(
+        cutoffMatchScore * 0.35 +
+        academicMatchScore * 0.25 +
+        branchMatchScore * 0.20 +
+        skillMatchScore * 0.10 +
+        locationMatchScore * 0.10
+      );
+    } else {
+      // Renormalize remaining 4 factors so missing cutoff does not unfairly penalize
+      // 0.25 + 0.20 + 0.10 + 0.10 = 0.65 total weight
+      compositeScore = Math.round(
+        (academicMatchScore * 0.25 +
+         branchMatchScore * 0.20 +
+         skillMatchScore * 0.10 +
+         locationMatchScore * 0.10) / 0.65
+      );
+    }
+
+    const finalScore = Math.min(Math.max(compositeScore, 55), 98);
+
+    // Provenance attribution notice
+    const sourceAttribution = matchedCutoffRecord?.source_name
+      ? `${matchedCutoffRecord.source_name} (EduSphere Verified Dataset)`
+      : "State CET Cell Maharashtra / Official Institutional Portals (EduSphere Verified Dataset)";
+    reasons.push(`Cutoff source: ${sourceAttribution}`);
 
     return {
       id: college.id,
       item_type: "college" as const,
       title: college.name,
-      subtitle: `${college.course || "Degree"} • ${college.location ? `${college.location}, ` : ""}${college.state || "India"}`,
+      subtitle: `${matchedCourseName} • ${college.location ? `${college.location}, ` : ""}${college.state || "Maharashtra"}`,
       match_score: finalScore,
       match_reasons: reasons,
       college,
-      is_ai_recommended: finalScore >= 85,
+      is_ai_recommended: finalScore >= 80,
       factor_breakdown: {
-        academic_match: academicMatch,
-        branch_match: branchMatch,
-        location_match: locationMatch,
-        eligibility_match: entranceScore >= estimatedCutoff ? 96 : 75,
+        academic_match: academicMatchScore,
+        branch_match: branchMatchScore,
+        location_match: locationMatchScore,
+        skill_match: skillMatchScore,
+        cutoff_match: cutoffMatchScore !== null ? cutoffMatchScore : undefined,
+        career_match: branchMatchScore,
+        eligibility_match:
+          cutoffStatus === "Cutoff compatible" ? 95 : cutoffStatus === "Cutoff not met" ? 65 : 75,
       },
-      relevant_cutoff: relevantCutoff,
+      relevant_cutoff: relevantCutoffText,
+      cutoff_status: cutoffStatus,
+      target_program_name: matchedCourseName,
+      cutoff_exam: cutoffExam,
+      cutoff_category: categoryEvaluated,
+      cutoff_value: cutoffValue,
+      cutoff_unit: cutoffUnit,
+      cutoff_round: matchedCutoffRecord?.round || undefined,
+      student_score: studentScore,
+      score_difference: scoreDifference,
+      source_attribution: sourceAttribution,
     };
   }).sort((a, b) => b.match_score - a.match_score);
 }
@@ -886,13 +1402,11 @@ export function computeCareerIntelligenceReport(
     strengths.push(`High entrance percentile (${studentProfile.entrance_score}) qualifying for premier institutional cutoffs.`);
   }
 
-  if (studentProfile?.entrance_score && studentProfile.entrance_score > 0) {
-    const qualifyingColleges = colleges.filter((c) => {
-      const cutoff = c.name.includes("IIT") || c.name.includes("BITS") ? 94 : 85;
-      return studentProfile.entrance_score! >= cutoff;
-    });
+  if (studentProfile?.entrance_score && studentProfile.entrance_score > 0 && colleges.length > 0) {
+    const collegeGuidance = computeCollegeGuidance(studentProfile, colleges);
+    const qualifyingColleges = collegeGuidance.filter((r) => r.cutoff_status === "Cutoff compatible");
     if (qualifyingColleges.length > 0) {
-      strengths.push(`Entrance benchmark qualifies for ${qualifyingColleges.length} accredited university programs.`);
+      strengths.push(`Entrance score qualifies for verified cutoff benchmarks across ${qualifyingColleges.length} accredited institutions.`);
     }
   }
 

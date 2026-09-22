@@ -15,11 +15,10 @@ import {
   Sparkles,
   Trash2,
   AlertCircle,
-  TrendingUp,
   Award,
-  Briefcase,
   Zap,
   Compass,
+  Building2,
 } from "@/components/icons";
 import { Logo } from "@/components/Logo";
 
@@ -44,9 +43,19 @@ interface AICareerAssistantProps {
 
 const STARTER_PROMPTS = [
   {
-    icon: Award,
-    title: "Placement Eligibility",
-    prompt: "Why am I eligible for these placements?",
+    icon: Building2,
+    title: "Targeting COEP",
+    prompt: "Can I target COEP Computer Engineering?",
+  },
+  {
+    icon: Compass,
+    title: "Compare Colleges",
+    prompt: "Compare COEP and PICT for my profile",
+  },
+  {
+    icon: Building2,
+    title: "Pune Colleges",
+    prompt: "Which Pune colleges have Computer Engineering?",
   },
   {
     icon: Zap,
@@ -54,24 +63,14 @@ const STARTER_PROMPTS = [
     prompt: "What skills should I learn next?",
   },
   {
-    icon: TrendingUp,
-    title: "Skill Gaps",
-    prompt: "Explain my skill gaps",
-  },
-  {
-    icon: Briefcase,
-    title: "Placement Prep",
-    prompt: "Help me prepare for placements",
+    icon: Award,
+    title: "Placement Eligibility",
+    prompt: "Why am I eligible for these placements?",
   },
   {
     icon: Sparkles,
     title: "Internship Match",
     prompt: "Which internship matches my profile?",
-  },
-  {
-    icon: Compass,
-    title: "Career Roadmap",
-    prompt: "Create a career roadmap for me",
   },
 ];
 
@@ -242,25 +241,87 @@ export function AICareerAssistant({
     setErrorMsg(null);
   };
 
-  // Helper for rendering simple markdown styling (bold, bullets, linebreaks)
+  // Helper for rendering simple markdown styling (bold, bullets, linebreaks, and tables)
   const renderMessageContent = (content: string) => {
-    const lines = content.split("\n");
+    const rawLines = content.split("\n");
+    const blocks: Array<{ type: "table" | "line"; lines: string[] }> = [];
+
+    let currentTable: string[] = [];
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i].trim();
+      if (line.startsWith("|") && line.endsWith("|")) {
+        currentTable.push(line);
+      } else {
+        if (currentTable.length > 0) {
+          blocks.push({ type: "table", lines: currentTable });
+          currentTable = [];
+        }
+        blocks.push({ type: "line", lines: [rawLines[i]] });
+      }
+    }
+    if (currentTable.length > 0) {
+      blocks.push({ type: "table", lines: currentTable });
+    }
+
     return (
       <div className="space-y-1.5 text-xs sm:text-sm leading-relaxed">
-        {lines.map((line, idx) => {
+        {blocks.map((block, bIdx) => {
+          if (block.type === "table") {
+            const tableLines = block.lines.filter((l) => !l.match(/^\|[\s\-:]+\|$/));
+            if (tableLines.length < 1) return null;
+            const headers = tableLines[0]
+              .split("|")
+              .slice(1, -1)
+              .map((c) => c.trim());
+            const rows = tableLines.slice(1).map((rowLine) =>
+              rowLine
+                .split("|")
+                .slice(1, -1)
+                .map((c) => c.trim())
+            );
+
+            return (
+              <div key={bIdx} className="my-2.5 overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-50/80 border-b border-slate-200">
+                    <tr>
+                      {headers.map((h, hIdx) => (
+                        <th key={hIdx} className="px-3 py-2 font-bold text-slate-900 whitespace-nowrap">
+                          {renderFormattedText(h)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {rows.map((r, rIdx) => (
+                      <tr key={rIdx} className="hover:bg-slate-50/50 transition">
+                        {r.map((cell, cIdx) => (
+                          <td key={cIdx} className="px-3 py-2 text-slate-700">
+                            {renderFormattedText(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+
+          const line = block.lines[0];
           const trimmed = line.trim();
 
           // Headers
           if (trimmed.startsWith("### ")) {
             return (
-              <h4 key={idx} className="font-bold text-slate-900 text-sm mt-3 mb-1">
+              <h4 key={bIdx} className="font-bold text-slate-900 text-sm mt-3 mb-1">
                 {trimmed.replace(/^###\s+/, "")}
               </h4>
             );
           }
           if (trimmed.startsWith("## ")) {
             return (
-              <h3 key={idx} className="font-bold text-slate-950 text-base mt-3 mb-1">
+              <h3 key={bIdx} className="font-bold text-slate-950 text-base mt-3 mb-1">
                 {trimmed.replace(/^##\s+/, "")}
               </h3>
             );
@@ -270,7 +331,7 @@ export function AICareerAssistant({
           if (trimmed.startsWith("• ") || trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
             const cleanText = trimmed.replace(/^[•\-\*]\s+/, "");
             return (
-              <div key={idx} className="flex items-start gap-2 ml-1">
+              <div key={bIdx} className="flex items-start gap-2 ml-1">
                 <span className="text-indigo-500 font-bold">•</span>
                 <span>{renderFormattedText(cleanText)}</span>
               </div>
@@ -281,7 +342,7 @@ export function AICareerAssistant({
           if (trimmed.startsWith("> ")) {
             return (
               <div
-                key={idx}
+                key={bIdx}
                 className="p-2.5 my-2 rounded-xl bg-slate-50 border border-slate-200/80 text-[11px] text-slate-600 italic"
               >
                 {renderFormattedText(trimmed.replace(/^>\s+/, ""))}
@@ -291,10 +352,10 @@ export function AICareerAssistant({
 
           // Empty line
           if (!trimmed) {
-            return <div key={idx} className="h-1" />;
+            return <div key={bIdx} className="h-1" />;
           }
 
-          return <p key={idx}>{renderFormattedText(line)}</p>;
+          return <p key={bIdx}>{renderFormattedText(line)}</p>;
         })}
       </div>
     );
@@ -312,9 +373,31 @@ export function AICareerAssistant({
         );
       }
       if (part.startsWith("`") && part.endsWith("`")) {
+        const inner = part.slice(1, -1);
+        if (inner === "Cutoff compatible") {
+          return (
+            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+              ✓ Cutoff compatible
+            </span>
+          );
+        }
+        if (inner === "Cutoff not met") {
+          return (
+            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 font-semibold text-[11px]">
+              ⚠ Cutoff not met
+            </span>
+          );
+        }
+        if (inner === "Cutoff unavailable") {
+          return (
+            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[11px]">
+              ○ Cutoff unavailable
+            </span>
+          );
+        }
         return (
           <code key={i} className="px-1.5 py-0.5 rounded bg-slate-100 font-mono text-[11px] text-indigo-700">
-            {part.slice(1, -1)}
+            {inner}
           </code>
         );
       }
