@@ -94,7 +94,7 @@ export function InternshipCard({ internship }: { internship: Internship }) {
             <span className="text-slate-500 font-medium">Monthly Stipend</span>
             <span className="font-bold text-slate-900 flex items-center gap-0.5">
               <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-              {internship.stipend || "Competitive / Unpaid"}
+              {internship.stipend || "Disclosed on Selection"}
             </span>
           </div>
 
@@ -171,7 +171,7 @@ export function InternshipCard({ internship }: { internship: Internship }) {
               </span>
               <span className="text-lg font-bold text-emerald-700 flex items-center gap-1">
                 <DollarSign className="w-4 h-4" />
-                {internship.stipend || "Competitive / Unpaid"}
+                {internship.stipend || "Disclosed on Selection"}
               </span>
             </div>
 

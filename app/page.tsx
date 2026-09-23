@@ -303,7 +303,7 @@ export default function LandingPage() {
                         Internships matched directly to your verified skills.
                       </h3>
                       <p className="text-xs sm:text-sm text-neutral-500 mt-0.5">
-                        Filter remote and onsite internships with clear stipend ranges, timelines, and skill prerequisites.
+                        Filter remote and onsite internships with clear application timelines and required skill prerequisites.
                       </p>
                     </div>
 
@@ -322,23 +322,23 @@ export default function LandingPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h4 className="text-base font-bold text-neutral-900">
-                            Frontend Developer Intern
+                            Software Engineering Intern
                           </h4>
                           <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             Internship Match 89%
                           </span>
                         </div>
                         <p className="text-xs text-neutral-500 mt-1 font-medium">
-                          TechSphere Cloud Labs • Remote Opportunity
+                          Microsoft • Bengaluru / Hyderabad
                         </p>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <span className="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
-                          Remote
+                          Onsite / Hybrid
                         </span>
                         <span className="px-3 py-1 rounded-lg bg-white text-neutral-700 text-xs font-bold border border-neutral-200">
-                          3 Months
+                          8–12 Weeks
                         </span>
                       </div>
                     </div>
@@ -349,7 +349,7 @@ export default function LandingPage() {
                         Matched to your skills:
                       </span>
                       <div className="flex flex-wrap gap-2">
-                        {["React", "JavaScript", "TypeScript", "Next.js", "Tailwind CSS"].map((skill) => (
+                        {["C++", "Java", "Python", "DSA", "Cloud"].map((skill) => (
                           <span
                             key={skill}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-neutral-100 text-neutral-800 text-xs font-medium"
@@ -362,8 +362,8 @@ export default function LandingPage() {
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-neutral-500 pt-1">
-                      <span>Stipend: ₹25,000 / month</span>
-                      <span className="text-neutral-900 font-semibold">Immediate Joining Available</span>
+                      <span>Stipend: Disclosed on Selection</span>
+                      <span className="text-neutral-900 font-semibold">Seasonal Academic Cycle</span>
                     </div>
                   </div>
                 </div>
@@ -401,14 +401,14 @@ export default function LandingPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <h4 className="text-base font-bold text-neutral-900">
-                            Software Engineer — Graduate Drive
+                            Systems Engineer
                           </h4>
                           <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-violet-50 text-violet-700 border border-violet-200">
                             Placement Opportunity
                           </span>
                         </div>
                         <p className="text-xs text-neutral-500 mt-1 font-medium">
-                          Apex Enterprise Systems • Technology &amp; FinTech
+                          Tata Consultancy Services • IT &amp; Services
                         </p>
                       </div>
 
@@ -423,7 +423,7 @@ export default function LandingPage() {
                       <div className="p-4 rounded-xl bg-white border border-neutral-200/70">
                         <span className="text-[11px] text-neutral-400 font-medium block">Eligibility Criteria</span>
                         <p className="text-xs font-bold text-neutral-900 mt-0.5">
-                          Minimum CGPA: 7.5
+                          Minimum CGPA: 6.0
                         </p>
                         <p className="text-[11px] text-neutral-500 mt-1">
                           Open to Final Year &amp; Pre-Final Year engineering students
@@ -433,7 +433,7 @@ export default function LandingPage() {
                       <div className="p-4 rounded-xl bg-white border border-neutral-200/70">
                         <span className="text-[11px] text-neutral-400 font-medium block">Target Skills</span>
                         <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {["Java", "Python", "SQL", "Data Structures"].map((s) => (
+                          {["Java", "Python", "C++", "SQL", "Problem Solving"].map((s) => (
                             <span
                               key={s}
                               className="px-2 py-0.5 rounded bg-neutral-100 text-neutral-800 text-[11px] font-medium"

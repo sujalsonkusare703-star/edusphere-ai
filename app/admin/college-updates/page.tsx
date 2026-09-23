@@ -93,73 +93,117 @@ export default function AdminCollegeUpdatesPage() {
   // Auth verification
   const isAuthorized = user?.app_metadata?.role === "admin" || user?.user_metadata?.role === "admin";
 
+  // Helper to build headers with authenticated Supabase Bearer token
+  const getAuthHeaders = useCallback(async (includeJson: boolean = false): Promise<Record<string, string>> => {
+    const token = await getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    if (includeJson) {
+      headers["Content-Type"] = "application/json";
+    }
+    return headers;
+  }, [getAccessToken]);
+
   // 1. Fetch Queue Events
   const fetchQueue = useCallback(async () => {
     setQueueLoading(true);
     setActionMessage(null);
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders();
+      if (!headers["Authorization"]) {
+        setActionMessage({
+          type: "error",
+          text: "Authentication session expired or unavailable. Please sign in again."
+        });
+        setQueueLoading(false);
+        return;
+      }
+
       const params = new URLSearchParams();
       if (statusFilter !== "ALL") params.set("status", statusFilter);
       if (signalFilter !== "ALL") params.set("signalLevel", signalFilter);
       if (searchTerm.trim()) params.set("search", searchTerm.trim());
 
-      const res = await fetch(`/api/admin/college-updates?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        }
-      });
+      const res = await fetch(`/api/admin/college-updates?${params.toString()}`, { headers });
 
       if (res.ok) {
         const data = await res.json();
         setEvents(data.events || []);
         if (data.stats) setStats(data.stats);
+      } else if (res.status === 401) {
+        setActionMessage({
+          type: "error",
+          text: "Unauthorized (401): Session token expired or invalid. Please refresh or sign in again."
+        });
       } else if (res.status === 403) {
-        // Forbidden
+        setActionMessage({
+          type: "error",
+          text: "Forbidden (403): Administrator privileges required."
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setActionMessage({
+          type: "error",
+          text: err.error || `Failed to load review queue (HTTP ${res.status}).`
+        });
       }
     } catch (err) {
       console.warn("Could not load admin queue:", err);
+      setActionMessage({
+        type: "error",
+        text: (err as Error)?.message || "Network error loading review queue."
+      });
     } finally {
       setQueueLoading(false);
     }
-  }, [getAccessToken, statusFilter, signalFilter, searchTerm]);
+  }, [getAuthHeaders, statusFilter, signalFilter, searchTerm]);
 
   // 1b. Fetch Monitored Sources
   const fetchSources = useCallback(async () => {
     setSourcesLoading(true);
     try {
-      const token = await getAccessToken();
-      const res = await fetch("/api/admin/college-sources", {
-        headers: {
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        }
-      });
+      const headers = await getAuthHeaders();
+      if (!headers["Authorization"]) {
+        setSourcesLoading(false);
+        return;
+      }
+
+      const res = await fetch("/api/admin/college-sources", { headers });
       if (res.ok) {
         const data = await res.json();
         setSources(data.sources || []);
+      } else if (res.status === 401) {
+        console.warn("[AdminPage] Unauthorized (401) fetching monitored sources");
+      } else if (res.status === 403) {
+        console.warn("[AdminPage] Forbidden (403) fetching monitored sources");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        console.warn("[AdminPage] Error fetching monitored sources:", err.error || res.status);
       }
     } catch (err) {
       console.warn("Could not load monitored sources:", err);
     } finally {
       setSourcesLoading(false);
     }
-  }, [getAccessToken]);
+  }, [getAuthHeaders]);
 
   // 1c. Trigger Global Scheduler Run
   const triggerSchedulerRun = async () => {
     setSchedulerRunning(true);
     setActionMessage(null);
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        setActionMessage({ type: "error", text: "Admin authentication session required." });
+        setSchedulerRunning(false);
+        return;
+      }
+
       const res = await fetch("/api/cron/college-updates", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key",
-          "Content-Type": "application/json"
-        },
+        headers,
         body: JSON.stringify({ batchSize: 10, forceCheckAll: true })
       });
       if (res.ok) {
@@ -171,7 +215,7 @@ export default function AdminCollegeUpdatesPage() {
         fetchQueue();
         fetchSources();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         setActionMessage({ type: "error", text: err.error || "Scheduler execution failed" });
       }
     } catch (err: unknown) {
@@ -185,14 +229,15 @@ export default function AdminCollegeUpdatesPage() {
   const triggerSingleSourceCheck = async (sourceId: string) => {
     setActionMessage(null);
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders(true);
+      if (!headers["Authorization"]) {
+        setActionMessage({ type: "error", text: "Admin authentication session required." });
+        return;
+      }
+
       const res = await fetch("/api/admin/college-sources", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key",
-          "Content-Type": "application/json"
-        },
+        headers,
         body: JSON.stringify({ sourceId })
       });
       if (res.ok) {
@@ -204,7 +249,7 @@ export default function AdminCollegeUpdatesPage() {
         fetchSources();
         fetchQueue();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         setActionMessage({ type: "error", text: err.error || "Single check failed" });
       }
     } catch (err: unknown) {
@@ -213,13 +258,22 @@ export default function AdminCollegeUpdatesPage() {
   };
 
   useEffect(() => {
+    let isMounted = true;
+
+    const loadData = async () => {
+      if (!isMounted) return;
+      await fetchQueue();
+      if (!isMounted) return;
+      await fetchSources();
+    };
+
     if (!loading && isAuthorized) {
-      const timer = setTimeout(() => {
-        fetchQueue();
-        fetchSources();
-      }, 0);
-      return () => clearTimeout(timer);
+      void loadData();
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [loading, isAuthorized, fetchQueue, fetchSources]);
 
   // 2. Fetch Event Comparison Details
@@ -231,13 +285,8 @@ export default function AdminCollegeUpdatesPage() {
     setActionMessage(null);
 
     try {
-      const token = await getAccessToken();
-      const res = await fetch(`/api/admin/college-updates/${eventId}`, {
-        headers: {
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        }
-      });
+      const headers = await getAuthHeaders();
+      const res = await fetch(`/api/admin/college-updates/${eventId}`, { headers });
 
       if (res.ok) {
         const data = await res.json();
@@ -252,7 +301,7 @@ export default function AdminCollegeUpdatesPage() {
           setCorrectedRoute(cand.routes[0].admission_route || "");
         }
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         setActionMessage({ type: "error", text: err.error || "Failed to load event details" });
       }
     } catch (err: unknown) {
@@ -269,7 +318,7 @@ export default function AdminCollegeUpdatesPage() {
     setActionMessage(null);
 
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders(true);
       const corrections: Record<string, unknown> = {};
 
       if (correctedCutoffValue) {
@@ -284,11 +333,7 @@ export default function AdminCollegeUpdatesPage() {
 
       const res = await fetch(`/api/admin/college-updates/${selectedEventId}`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        },
+        headers,
         body: JSON.stringify({ corrections })
       });
 
@@ -296,7 +341,7 @@ export default function AdminCollegeUpdatesPage() {
         setActionMessage({ type: "success", text: "Admin correction recorded. Ready for approval." });
         openEventDetails(selectedEventId);
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         setActionMessage({ type: "error", text: err.error || "Failed to save correction" });
       }
     } catch (err: unknown) {
@@ -317,21 +362,17 @@ export default function AdminCollegeUpdatesPage() {
     setActionMessage(null);
 
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders(true);
       const res = await fetch(`/api/admin/college-updates/${selectedEventId}/approve`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        },
+        headers,
         body: JSON.stringify({
           notes: "Approved via Admin Review Queue",
           forceOverrideConflicts: false
         })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setActionMessage({
           type: "success",
@@ -359,18 +400,14 @@ export default function AdminCollegeUpdatesPage() {
     setActionMessage(null);
 
     try {
-      const token = await getAccessToken();
+      const headers = await getAuthHeaders(true);
       const res = await fetch(`/api/admin/college-updates/${selectedEventId}/reject`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token || "demo-admin-token"}`,
-          "x-edusphere-admin-key": "demo-admin-key"
-        },
+        headers,
         body: JSON.stringify({ reason: rejectionReason.trim() })
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setActionMessage({ type: "success", text: "Event rejected successfully." });
         setRejectModalOpen(false);

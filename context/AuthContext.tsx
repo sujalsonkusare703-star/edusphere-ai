@@ -860,7 +860,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const nowSec = Math.floor(Date.now() / 1000);
         const expiresAt = currentSession.expires_at;
         if (!expiresAt || expiresAt > nowSec + 60) {
-          setSession(currentSession);
           return currentSession.access_token;
         }
       }
@@ -868,10 +867,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 3. Token is expired or expiring within 60s -> refresh session
       const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
       if (!refreshErr && refreshData?.session?.access_token) {
-        setSession(refreshData.session);
-        if (refreshData.session.user) {
-          setUser(refreshData.session.user);
-        }
         return refreshData.session.access_token;
       }
 
@@ -880,12 +875,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return currentSession.access_token;
       }
 
-      return session?.access_token || null;
+      return null;
     } catch (err) {
       console.warn("[AuthContext] getAccessToken exception:", err);
-      return session?.access_token || null;
+      return null;
     }
-  }, [user, supabase, session]);
+  }, [user, supabase]);
 
   const refreshSession = useCallback(async (): Promise<Session | null> => {
     try {

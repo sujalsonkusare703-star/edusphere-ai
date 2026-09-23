@@ -7,8 +7,8 @@ import {
   SanitizedStudentContext,
   EvaluatedCollegeContext,
 } from "@/lib/ai-context";
-import { fetchColleges } from "@/lib/supabase/opportunities";
-import { computeCollegeGuidance } from "@/lib/ai-guidance";
+import { fetchColleges, fetchInternships, fetchPlacements } from "@/lib/supabase/opportunities";
+import { computeCollegeGuidance, computeInternshipGuidance, computePlacementGuidance } from "@/lib/ai-guidance";
 
 // Lightweight in-memory rate limiter: max 20 requests per minute per identifier
 interface RateLimitEntry {
@@ -311,7 +311,9 @@ ${displayList
 
   // 5. Missing Score Handler (Section F & Test 9)
   const isCutoffOrTargetQuery =
-    q.includes("cutoff") || q.includes("target") || q.includes("chance") || q.includes("eligible");
+    (q.includes("cutoff") || q.includes("target") || q.includes("chance") || q.includes("eligible")) &&
+    !q.includes("placement") &&
+    !q.includes("intern");
 
   if (isCutoffOrTargetQuery && academicProfile.entranceScoreNumeric === null && !q.includes("why was") && !q.includes("what happens") && !q.includes("unavailable")) {
     return `### ⚠️ Entrance Score Required for Cutoff Analysis
@@ -598,34 +600,34 @@ ${targetAnswer}
 > *Note: Based on the current EduSphere Supabase dataset. Cutoff compatibility indicates historical academic alignment and does not guarantee admission.*`;
   }
 
-  // 8. Skill Gaps & Career Goal Questions (Test 8 & Section I)
-  if (q.includes("skill") || q.includes("gap") || q.includes("learn") || q.includes("improve") || q.includes("career goal")) {
-    const missing = skillGaps.missingHighPrioritySkills;
-    const recommended = skillGaps.recommendedSkills;
-    return `Hello **${studentName}**, based on your career goal (**${academicProfile.careerGoal}**) and technical profile:
-
-### 🎯 High-Priority Skills to Learn
-Your profile currently records: **${skillsInventory.length > 0 ? skillsInventory.join(", ") : "No skills recorded yet"}**.
+  // 8. Internship Matching questions (Prioritized before generic skill gap queries)
+  if (q.includes("intern") || q.includes("stipend") || (q.includes("role") && !q.includes("college"))) {
+    const topInt = topRecommendations.internships;
+    return `### 💼 Personalized Internship Matching
+Here is how your technical skills and background align with internships in our database:
 
 ${
-  missing.length > 0
-    ? `**Critical Skills for ${academicProfile.careerGoal}:**\n${missing.map((s) => `• **${s}**: In high demand by active campus placement recruiters in our dataset.`).join("\n")}`
-    : "✅ You currently meet core prerequisite skills for your top matching career pathways!"
+  topInt.length > 0
+    ? topInt
+        .map(
+          (i) =>
+            `• **${i.role}** at **${i.company}** (Match Score: **${i.matchScore}%**)\n  - **Matching Skills:** ${
+              i.matchingSkills.length > 0 ? i.matchingSkills.join(", ") : "None recorded yet"
+            }\n  - **Skills to Acquire:** ${
+              i.missingSkills.length > 0 ? i.missingSkills.join(", ") : "All prerequisites met!"
+            }`
+        )
+        .join("\n\n")
+    : "• No active internship matches currently computed."
 }
 
-${
-  recommended.length > 0
-    ? `\n**Recommended Next Specializations:**\n${recommended.map((s) => `• **${s}**: Highly valued for ${academicProfile.preferredBranch} roles.`).join("\n")}`
-    : ""
-}
-
-### 💡 Actionable Next Step
-Focus on closing your top priority skill (**${missing[0] || recommended[0] || "Data Structures & Algorithms"}**) by building an end-to-end project. Updating your skills in **Profile Settings** will dynamically raise your placement eligibility and opportunity scores.
+### 🚀 Recommendation
+Review the missing skills for your top internship choice above and add them to your weekly learning schedule.
 
 > *Note: Based on the current EduSphere Supabase dataset.*`;
   }
 
-  // 9. Placement Eligibility questions
+  // 9. Placement Eligibility questions (Prioritized before generic skill gap queries)
   if (q.includes("placement") || q.includes("eligib") || q.includes("drive") || q.includes("cgpa")) {
     const cgpa = academicProfile.cgpa;
     const eligibleCount = metrics.placementReadiness.eligibleDrives;
@@ -660,29 +662,29 @@ ${
 > *Note: Based on the current EduSphere Supabase dataset.*`;
   }
 
-  // 10. Internship Matching questions
-  if (q.includes("intern") || q.includes("stipend") || q.includes("role")) {
-    const topInt = topRecommendations.internships;
-    return `### 💼 Personalized Internship Matching
-Here is how your technical skills and background align with internships in our database:
+  // 10. Skill Gaps & Career Goal Questions
+  if (q.includes("skill") || q.includes("gap") || q.includes("learn") || q.includes("improve") || q.includes("career goal")) {
+    const missing = skillGaps.missingHighPrioritySkills;
+    const recommended = skillGaps.recommendedSkills;
+    return `Hello **${studentName}**, based on your career goal (**${academicProfile.careerGoal}**) and technical profile:
+
+### 🎯 High-Priority Skills to Learn
+Your profile currently records: **${skillsInventory.length > 0 ? skillsInventory.join(", ") : "No skills recorded yet"}**.
 
 ${
-  topInt.length > 0
-    ? topInt
-        .map(
-          (i) =>
-            `• **${i.role}** at **${i.company}** (Match Score: **${i.matchScore}%**)\n  - **Matching Skills:** ${
-              i.matchingSkills.length > 0 ? i.matchingSkills.join(", ") : "None recorded yet"
-            }\n  - **Skills to Acquire:** ${
-              i.missingSkills.length > 0 ? i.missingSkills.join(", ") : "All prerequisites met!"
-            }`
-        )
-        .join("\n\n")
-    : "• No active internship matches currently computed."
+  missing.length > 0
+    ? `**Critical Skills for ${academicProfile.careerGoal}:**\n${missing.map((s) => `• **${s}**: In high demand by active campus placement recruiters in our dataset.`).join("\n")}`
+    : "✅ You currently meet core prerequisite skills for your top matching career pathways!"
 }
 
-### 🚀 Recommendation
-Review the missing skills for your top internship choice above and add them to your weekly learning schedule.
+${
+  recommended.length > 0
+    ? `\n**Recommended Next Specializations:**\n${recommended.map((s) => `• **${s}**: Highly valued for ${academicProfile.preferredBranch} roles.`).join("\n")}`
+    : ""
+}
+
+### 💡 Actionable Next Step
+Focus on closing your top priority skill (**${missing[0] || recommended[0] || "Data Structures & Algorithms"}**) by building an end-to-end project. Updating your skills in **Profile Settings** will dynamically raise your placement eligibility and opportunity scores.
 
 > *Note: Based on the current EduSphere Supabase dataset.*`;
   }
@@ -777,9 +779,13 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const supabaseKey =
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
       const supabase = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+        supabaseKey!,
         {
           auth: {
             persistSession: false,
@@ -832,19 +838,43 @@ export async function POST(req: NextRequest) {
 
     // 5. Build Sanitized AI Context & Master System Prompt
     let resolvedColleges = context?.colleges || [];
-    if (resolvedColleges.length === 0) {
+    let resolvedInternships = context?.internships || [];
+    let resolvedPlacements = context?.placements || [];
+
+    if (resolvedColleges.length === 0 || resolvedInternships.length === 0 || resolvedPlacements.length === 0) {
       try {
+        const serverSupabaseKey =
+          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
         const serverSupabase = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+          serverSupabaseKey!,
           { auth: { persistSession: false, autoRefreshToken: false } }
         );
-        const { data: dbCols } = await fetchColleges(serverSupabase);
-        if (dbCols && dbCols.length > 0) {
-          resolvedColleges = computeCollegeGuidance(context?.studentProfile || null, dbCols, context?.skills || []);
+
+        if (resolvedColleges.length === 0) {
+          const { data: dbCols } = await fetchColleges(serverSupabase);
+          if (dbCols && dbCols.length > 0) {
+            resolvedColleges = computeCollegeGuidance(context?.studentProfile || null, dbCols, context?.skills || []);
+          }
+        }
+
+        if (resolvedInternships.length === 0) {
+          const { data: dbInts } = await fetchInternships(serverSupabase, { isDemo });
+          if (dbInts && dbInts.length > 0) {
+            resolvedInternships = computeInternshipGuidance(context?.studentProfile || null, context?.skills || [], dbInts);
+          }
+        }
+
+        if (resolvedPlacements.length === 0) {
+          const { data: dbPlcs } = await fetchPlacements(serverSupabase, { isDemo });
+          if (dbPlcs && dbPlcs.length > 0) {
+            resolvedPlacements = computePlacementGuidance(context?.studentProfile || null, context?.skills || [], dbPlcs);
+          }
         }
       } catch (colErr) {
-        console.warn("Non-blocking note: could not fetch server colleges:", colErr);
+        console.warn("Non-blocking note: could not fetch server catalog:", colErr);
       }
     }
 
@@ -861,8 +891,8 @@ export async function POST(req: NextRequest) {
       careerReport: context?.careerReport || null,
       skillGap: context?.skillGap || null,
       colleges: resolvedColleges,
-      internships: context?.internships || [],
-      placements: context?.placements || [],
+      internships: resolvedInternships,
+      placements: resolvedPlacements,
       isDemo,
     });
 

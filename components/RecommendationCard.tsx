@@ -608,7 +608,7 @@ export function RecommendationCard({ item }: { item: RecommendationItem }) {
                 <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-100">
                   <span className="text-xs text-slate-600 block mb-1">Monthly Stipend</span>
                   <span className="text-base font-bold text-emerald-700">
-                    {item.internship.stipend || "Stipend Provided"}
+                    {item.internship.stipend || "Disclosed on Selection"}
                   </span>
                 </div>
                 <div className="p-4 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA]">

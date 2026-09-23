@@ -210,6 +210,7 @@ export interface DatabaseInternshipRow {
   remote: boolean | string | null;
   stipend: number | string | null;
   duration: string | null;
+  data_source?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -221,6 +222,7 @@ export interface DatabasePlacementRow {
   industry: string | null;
   min_cgpa: number | string | null;
   location: string | null;
+  data_source?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -581,10 +583,19 @@ export async function fetchColleges(
 
 /**
  * Fetches all internships and their associated skills from Supabase efficiently (2 batched queries).
+ * In normal flow, Supabase is the sole source of truth; returns [] if table is empty.
+ * Isolated demo mode is supported via options.isDemo.
  */
 export async function fetchInternships(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  options?: { isDemo?: boolean }
 ): Promise<{ data: Internship[]; error: string | null }> {
+  // Explicit isolated demo-preview mode
+  if (options?.isDemo) {
+    const { demoInternships } = await import("@/lib/demo-data");
+    return { data: demoInternships, error: null };
+  }
+
   try {
     const { data: intData, error: intErr } = await supabase
       .from("internships")
@@ -599,7 +610,21 @@ export async function fetchInternships(
       return { data: [], error: null };
     }
 
-    const intIds = (intData as DatabaseInternshipRow[]).map((i) => i.id);
+    // Defensive filtering: exclude legacy demo_seed rows and companies starting with "Demo"
+    const cleanRows = (intData as DatabaseInternshipRow[]).filter((i) => {
+      if (!i.company) return false;
+      const compLower = i.company.toLowerCase().trim();
+      if (i.data_source === "demo_seed" || compLower.startsWith("demo")) {
+        return false;
+      }
+      return true;
+    });
+
+    if (cleanRows.length === 0) {
+      return { data: [], error: null };
+    }
+
+    const intIds = cleanRows.map((i) => i.id);
     const skillsMap: Record<string, string[]> = {};
 
     if (intIds.length > 0) {
@@ -618,7 +643,7 @@ export async function fetchInternships(
       }
     }
 
-    const mapped = (intData as DatabaseInternshipRow[]).map((item) =>
+    const mapped = cleanRows.map((item) =>
       mapDatabaseInternship(item, skillsMap[item.id] || [])
     );
 
@@ -631,10 +656,19 @@ export async function fetchInternships(
 
 /**
  * Fetches all placements and their associated skills from Supabase efficiently (2 batched queries).
+ * In normal flow, Supabase is the sole source of truth; returns [] if table is empty.
+ * Isolated demo mode is supported via options.isDemo.
  */
 export async function fetchPlacements(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  options?: { isDemo?: boolean }
 ): Promise<{ data: Placement[]; error: string | null }> {
+  // Explicit isolated demo-preview mode
+  if (options?.isDemo) {
+    const { demoPlacements } = await import("@/lib/demo-data");
+    return { data: demoPlacements, error: null };
+  }
+
   try {
     const { data: plcData, error: plcErr } = await supabase
       .from("placements")
@@ -649,7 +683,21 @@ export async function fetchPlacements(
       return { data: [], error: null };
     }
 
-    const plcIds = (plcData as DatabasePlacementRow[]).map((p) => p.id);
+    // Defensive filtering: exclude legacy demo_seed rows and companies starting with "Demo"
+    const cleanRows = (plcData as DatabasePlacementRow[]).filter((p) => {
+      if (!p.company) return false;
+      const compLower = p.company.toLowerCase().trim();
+      if (p.data_source === "demo_seed" || compLower.startsWith("demo")) {
+        return false;
+      }
+      return true;
+    });
+
+    if (cleanRows.length === 0) {
+      return { data: [], error: null };
+    }
+
+    const plcIds = cleanRows.map((p) => p.id);
     const skillsMap: Record<string, string[]> = {};
 
     if (plcIds.length > 0) {
@@ -668,7 +716,7 @@ export async function fetchPlacements(
       }
     }
 
-    const mapped = (plcData as DatabasePlacementRow[]).map((item) =>
+    const mapped = cleanRows.map((item) =>
       mapDatabasePlacement(item, skillsMap[item.id] || [])
     );
 
@@ -684,7 +732,8 @@ export async function fetchPlacements(
  * Reused by Dashboard and Recommendations to guarantee cross-app data parity.
  */
 export async function fetchAllOpportunities(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  options?: { isDemo?: boolean }
 ): Promise<{
   colleges: College[];
   internships: Internship[];
@@ -694,8 +743,8 @@ export async function fetchAllOpportunities(
   try {
     const [colResult, intResult, plcResult] = await Promise.all([
       fetchColleges(supabase),
-      fetchInternships(supabase),
-      fetchPlacements(supabase),
+      fetchInternships(supabase, options),
+      fetchPlacements(supabase, options),
     ]);
 
     const error = colResult.error || intResult.error || plcResult.error || null;
@@ -743,6 +792,23 @@ export async function logRecommendationActivity(
   }
 
   try {
+    // Verify that the student profile row actually exists in Supabase before attempting insert
+    const { data: profileCheck, error: profileCheckErr } = await supabase
+      .from("student_profiles")
+      .select("id")
+      .eq("id", studentProfileId)
+      .maybeSingle();
+
+    if (profileCheckErr) {
+      console.warn("Student profile verification note for recommendation log:", profileCheckErr.message);
+      return { success: false, count: 0, error: profileCheckErr.message };
+    }
+
+    if (!profileCheck) {
+      // Profile does not exist yet; skip logging gracefully without erroring or blocking
+      return { success: false, count: 0, error: "Student profile not found in database" };
+    }
+
     // Select top AI recommendations (is_ai_recommended) or top 10 ranked items
     const aiRecommended = items.filter((item) => item.is_ai_recommended);
     const targetItems = aiRecommended.length > 0 ? aiRecommended.slice(0, 10) : items.slice(0, 6);

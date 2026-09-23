@@ -222,24 +222,28 @@ export default function LoginPage() {
               )}
             </button>
 
-            <div className="relative my-4 flex items-center justify-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-neutral-200" />
-              </div>
-              <span className="relative bg-white px-3 text-[11px] font-medium text-neutral-400">
-                OR
-              </span>
-            </div>
+            {process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === "true" && (
+              <>
+                <div className="relative my-4 flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-neutral-200" />
+                  </div>
+                  <span className="relative bg-white px-3 text-[11px] font-medium text-neutral-400">
+                    OR
+                  </span>
+                </div>
 
-            <button
-              type="button"
-              onClick={handleQuickDemo}
-              disabled={loading}
-              className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-medium text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Explore as Demo Student (1-Click)</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={handleQuickDemo}
+                  disabled={loading}
+                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-medium text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Explore as Demo Student (1-Click)</span>
+                </button>
+              </>
+            )}
           </form>
 
           <div className="mt-6 pt-6 border-t border-neutral-100 text-center">
