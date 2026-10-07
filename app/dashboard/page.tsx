@@ -21,6 +21,7 @@ import {
   Sparkles,
   ArrowRight,
   AlertCircle,
+  CheckCircle,
 } from "@/components/icons";
 
 import { calculateProfileStrength } from "@/lib/profile-utils";
@@ -104,6 +105,35 @@ export default function DashboardPage() {
       savedItemIds.size
     );
   }, [profile, studentProfile, skills, colleges, internships, placements, savedItemIds.size]);
+
+  const totalProgramsCount = useMemo(() => {
+    return colleges.reduce(
+      (acc, c) =>
+        acc +
+        (c.courses_count ||
+          c.courses?.length ||
+          c.programs?.length ||
+          1),
+      0
+    );
+  }, [colleges]);
+
+  const puneCollegesCount = useMemo(() => {
+    return colleges.filter(
+      (c) =>
+        c.district?.toLowerCase() === "pune" ||
+        c.location?.toLowerCase().includes("pune")
+    ).length;
+  }, [colleges]);
+
+  const totalDistrictsCount = useMemo(() => {
+    const set = new Set<string>();
+    colleges.forEach((c) => {
+      if (c.district) set.add(c.district.trim());
+      else if (c.location) set.add(c.location.trim());
+    });
+    return set.size || 1;
+  }, [colleges]);
 
   const studentDisplayName =
     profile?.full_name ||
@@ -268,23 +298,37 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 text-xs">
             <div>
               <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
-                Target Branch
+                Target Field
               </span>
-              <span className="font-semibold text-slate-900 text-sm">
-                {studentProfile?.preferred_branch || "Not configured"}
+              <span className="font-semibold text-slate-900 text-sm truncate block" title={studentProfile?.preferred_field || "Not set"}>
+                {studentProfile?.preferred_field || "Engineering & Tech"}
               </span>
             </div>
             <div>
               <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
-                Current CGPA
+                Target Degree
               </span>
-              <span className="font-semibold text-slate-900 text-sm">
-                {studentProfile?.cgpa !== null && studentProfile?.cgpa !== undefined
-                  ? `${studentProfile.cgpa}`
-                  : "Not set"}
+              <span className="font-semibold text-slate-900 text-sm truncate block" title={studentProfile?.preferred_degree || studentProfile?.preferred_branch || "Not configured"}>
+                {studentProfile?.preferred_degree || studentProfile?.preferred_branch || "Undergraduate"}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
+                Target District
+              </span>
+              <span className="font-semibold text-slate-900 text-sm truncate block" title={studentProfile?.preferred_district || studentProfile?.preferred_location || "Pune"}>
+                {studentProfile?.preferred_district || studentProfile?.preferred_location || "Pune Region"}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
+                Preferred University
+              </span>
+              <span className="font-semibold text-slate-900 text-sm truncate block" title={studentProfile?.preferred_university || "Accredited State Univ"}>
+                {studentProfile?.preferred_university || "SPPU / State Univ"}
               </span>
             </div>
             <div>
@@ -299,18 +343,84 @@ export default function DashboardPage() {
             </div>
             <div>
               <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
-                Preferred Location
+                Current CGPA
               </span>
               <span className="font-semibold text-slate-900 text-sm">
-                {studentProfile?.preferred_location || "Any Region"}
+                {studentProfile?.cgpa !== null && studentProfile?.cgpa !== undefined
+                  ? `${studentProfile.cgpa}`
+                  : "Not set"}
               </span>
             </div>
+          </div>
+        </div>
+
+        {/* Maharashtra & Pune Higher Education Dataset Highlights Strip */}
+        <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 mb-4 border-b border-[#F1F5F9]">
             <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold mb-1 border border-emerald-200">
+                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Authoritative Higher Education Registry</span>
+              </div>
+              <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+                Maharashtra & Pune Educational Landscape
+              </h3>
+              <p className="text-xs text-slate-500">
+                Live Supabase higher education dataset powering discovery, admission routes, and cutoff matching
+              </p>
+            </div>
+            <Link
+              href="/colleges"
+              className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition inline-flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <span>Explore Directory</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
               <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
-                Recorded Skills
+                Total Institutions
               </span>
-              <span className="font-semibold text-slate-900 text-sm">
-                {skills.length > 0 ? `${skills.length} skills listed` : "None added yet"}
+              <span className="text-xl font-extrabold text-slate-900">
+                {collegesCount}
+              </span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">
+                Accredited campuses
+              </span>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
+                Pune Region Campuses
+              </span>
+              <span className="text-xl font-extrabold text-indigo-600">
+                {puneCollegesCount}
+              </span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">
+                Primary educational hub
+              </span>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
+                Sanctioned Programs
+              </span>
+              <span className="text-xl font-extrabold text-slate-900">
+                {totalProgramsCount}
+              </span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">
+                Approved degree branches
+              </span>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+              <span className="text-slate-400 block mb-0.5 uppercase tracking-wider text-[10px] font-bold">
+                Districts Covered
+              </span>
+              <span className="text-xl font-extrabold text-slate-900">
+                {totalDistrictsCount}
+              </span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">
+                Across Maharashtra state
               </span>
             </div>
           </div>
@@ -345,17 +455,17 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-                Featured Colleges Catalog
+                Featured Institutions
               </h3>
               <p className="text-xs text-slate-500">
-                Institutions from Supabase colleges table
+                Top accredited campuses from the live Maharashtra higher education database
               </p>
             </div>
             <Link
               href="/colleges"
               className="text-xs font-semibold text-slate-900 hover:text-indigo-600 flex items-center gap-1 transition"
             >
-              View all colleges &rarr;
+              View all {collegesCount} colleges &rarr;
             </Link>
           </div>
 
@@ -367,7 +477,7 @@ export default function DashboardPage() {
             </div>
           ) : colleges.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {colleges.map((college) => (
+              {colleges.slice(0, 6).map((college) => (
                 <CollegeCard key={college.id} college={college} />
               ))}
             </div>

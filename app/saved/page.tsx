@@ -150,9 +150,9 @@ export default function SavedPage() {
                 return {
                   ...item,
                   item_id: normalId,
-                  college: collegesMap[item.item_id] || undefined,
-                  internship: internshipsMap[item.item_id] || undefined,
-                  placement: placementsMap[item.item_id] || undefined,
+                  college: collegesMap[item.item_id] || collegesMap[normalId] || undefined,
+                  internship: internshipsMap[item.item_id] || internshipsMap[normalId] || undefined,
+                  placement: placementsMap[item.item_id] || placementsMap[normalId] || undefined,
                 };
               })
               .filter((item) => item.college || item.internship || item.placement);

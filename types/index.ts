@@ -16,6 +16,11 @@ export interface StudentProfile {
   career_goal?: string | null;
   category?: string | null; // e.g. 'OPEN', 'OBC', 'SC', 'ST'
   entrance_exam?: string | null; // e.g. 'MHT CET', 'JEE Main'
+  preferred_field?: string | null;
+  preferred_degree_level?: string | null;
+  preferred_degree?: string | null;
+  preferred_district?: string | null;
+  preferred_university?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -72,6 +77,13 @@ export interface CollegeCourse {
   admission_source_name?: string;
   admission_source_url?: string;
   admission_verification_status?: VerificationStatus;
+  canonical_program_id?: number | null;
+  field?: string | null;
+  sub_field?: string | null;
+  degree_level?: string | null;
+  degree?: string | null;
+  duration_years?: string | null;
+  mode?: string | null;
   cutoffs?: CollegeCutoff[];
 }
 
@@ -79,6 +91,7 @@ export interface College {
   id: string;
   source_id?: number | null;
   name: string;
+  short_name?: string | null;
   location: string | null;
   state: string | null;
   course: string | null;
@@ -102,6 +115,24 @@ export interface College {
   admission_verification_status?: VerificationStatus;
   courses_count?: number;
   courses?: CollegeCourse[];
+  university_id?: number | null;
+  university_name?: string | null;
+  district?: string | null;
+  taluka?: string | null;
+  city?: string | null;
+  address?: string | null;
+  pin_code?: string | null;
+  institution_type?: string | null;
+  ownership?: string | null;
+  established_year?: number | string | null;
+  autonomous_status?: string | null;
+  admission_url?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  verification_status?: VerificationStatus | string | null;
+  last_verified_at?: string | null;
+  academic_year?: string | null;
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -228,18 +259,268 @@ export interface InternshipSkill {
 
 export interface Placement {
   id: string;
-  company: string;
-  role: string;
-  industry: string | null;
-  min_cgpa: number | null;
-  location: string | null;
+  company?: string | null;
+  role?: string | null;
+  industry?: string | null;
+  min_cgpa?: number | null;
+  location?: string | null;
   skills?: string[];
+  college_id?: string | null;
+  program_id?: number | null;
+  metric_name?: string | null;
+  metric_value?: string | null;
+  metric_unit?: string | null;
+  placement_year?: string | null;
+  recruiters?: string | null;
+  internship_details?: string | null;
+  avg_package?: number | string | null;
+  highest_package?: number | string | null;
+  package?: number | string | null;
+  verification_status?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  last_verified_at?: string | null;
+  notes?: string | null;
 }
 
 export interface PlacementSkill {
   id: string;
   placement_id: string;
   skill_name: string;
+}
+
+export interface CanonicalSource {
+  source_id: number;
+  source_name: string;
+  name?: string;
+  source_type?: string | null;
+  organization?: string | null;
+  publisher?: string | null;
+  url?: string | null;
+  publication_year?: number | null;
+  retrieved_at?: string | null;
+  sha256?: string | null;
+  verification_status?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalUniversity {
+  university_id: number;
+  official_name: string;
+  university_type?: string | null;
+  ownership?: string | null;
+  state?: string | null;
+  district?: string | null;
+  city?: string | null;
+  official_website?: string | null;
+  source_id?: number | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalProgram {
+  program_id: number;
+  institution_id?: number | null;
+  college_id?: string | null;
+  field?: string | null;
+  sub_field?: string | null;
+  stream?: string | null;
+  degree_level?: string | null;
+  degree?: string | null;
+  official_program_name: string;
+  specialization?: string | null;
+  duration_years?: string | null;
+  mode?: string | null;
+  intake?: string | null;
+  course_url?: string | null;
+  academic_year?: string | null;
+  source_id?: number | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalAdmission {
+  admission_id: number;
+  id?: number | string;
+  institution_id?: number | null;
+  college_id?: string | null;
+  program_id?: number | null;
+  admission_route?: string | null;
+  entrance_exam?: string | null;
+  admission_authority?: string | null;
+  eligibility?: string | null;
+  required_subjects?: string | null;
+  minimum_marks?: string | null;
+  other_requirements?: string | null;
+  application_url?: string | null;
+  academic_year?: string | null;
+  important_dates?: string | null;
+  source_id?: number | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalCutoff {
+  cutoff_id: number;
+  institution_id?: number | null;
+  college_id?: string | null;
+  program_id?: number | null;
+  choice_code?: string | null;
+  exam?: string | null;
+  admission_route?: string | null;
+  academic_year?: string | null;
+  round?: string | null;
+  category?: string | null;
+  quota?: string | null;
+  seat_type?: string | null;
+  cutoff_type?: string | null;
+  cutoff_value?: string | null;
+  cutoff_unit?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalFee {
+  fee_id: number;
+  id?: number | string;
+  institution_id?: number | null;
+  college_id?: string | null;
+  program_id?: number | null;
+  academic_year?: string | null;
+  tuition_fee?: number | null;
+  development_fee?: number | null;
+  mandatory_charges?: number | null;
+  other_charges?: number | null;
+  total_annual_academic_fee?: number | null;
+  total_fee?: number | null;
+  hostel_fee?: number | null;
+  other_compulsory_charges?: number | null;
+  fee_category?: string | null;
+  quota_or_category?: string | null;
+  currency?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalFacility {
+  facility_id: number;
+  id?: number | string;
+  institution_id?: number | null;
+  college_id?: string | null;
+  facility_type: string;
+  description?: string | null;
+  capacity?: string | null;
+  academic_year?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  verification_status?: string | null;
+  verified?: boolean;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalAccreditation {
+  accreditation_id: number;
+  id?: number | string;
+  institution_id?: number | null;
+  college_id?: string | null;
+  program_id?: number | null;
+  body: string;
+  record_type?: string | null;
+  approval_identifier?: string | null;
+  status?: string | null;
+  grade?: string | null;
+  grade_or_status?: string | null;
+  cycle?: string | null;
+  cgpa?: string | number | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  valid_until?: string | null;
+  academic_year?: string | null;
+  scope?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface CanonicalScholarship {
+  scholarship_id: number;
+  institution_id?: number | null;
+  college_id?: string | null;
+  program_id?: number | null;
+  name: string;
+  provider?: string | null;
+  eligibility?: string | null;
+  category?: string | null;
+  benefit?: string | null;
+  academic_year?: string | null;
+  application_url?: string | null;
+  source_id?: number | null;
+  source_url?: string | null;
+  verification_status?: string | null;
+  last_verified?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+export interface InstitutionSource {
+  id: string;
+  institution_id?: number | null;
+  college_id?: string | null;
+  source_id?: number | null;
+  source_page?: string | null;
+  evidence?: string | null;
+  verification_status?: string | null;
+  status?: string | null;
+  last_verified?: string | null;
+  verified_at?: string | null;
+  created_at?: string;
+  source?: CanonicalSource | null;
+}
+
+export interface AdmissionSource {
+  admission_source_id: number;
+  admission_id: number;
+  source_id?: number | null;
+  source_url?: string | null;
+  evidence?: string | null;
+  verification_status?: string | null;
+  created_at?: string;
+  source?: CanonicalSource | null;
+}
+
+export interface VerificationAudit {
+  audit_id: number;
+  id?: number | string;
+  entity_type: string;
+  audit_type?: string;
+  entity_id: string;
+  field_name: string;
+  old_value?: string | null;
+  new_value?: string | null;
+  source_id?: number | null;
+  audit_date?: string | null;
+  reviewer?: string | null;
+  notes?: string | null;
+  created_at?: string;
 }
 
 export interface SavedItem {

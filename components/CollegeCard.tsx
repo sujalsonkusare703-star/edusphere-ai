@@ -14,6 +14,7 @@ import {
   BookmarkCheck,
   Award,
   ExternalLink,
+  CheckCircle,
 } from "@/components/icons";
 
 export function CollegeCard({ college }: { college: College }) {
@@ -31,7 +32,7 @@ export function CollegeCard({ college }: { college: College }) {
   };
 
   const formatCurrency = (val?: number | null) => {
-    if (!val) return "N/A";
+    if (!val || val <= 0) return "N/A";
     if (val >= 100000) {
       return `₹${(val / 100000).toFixed(1)} Lakh`;
     }
@@ -39,24 +40,48 @@ export function CollegeCard({ college }: { college: College }) {
   };
 
   const totalSeats = college.courses?.reduce((acc, c) => acc + (c.intake || 0), 0);
-  const totalPrograms = college.courses?.length || college.programs?.length || (college.course ? 1 : 0);
+  const totalPrograms =
+    college.courses_count ||
+    college.courses?.length ||
+    college.programs?.length ||
+    (college.course ? 1 : 0);
+
+  const locationLabel =
+    [college.taluka, college.district, college.state || "Maharashtra"]
+      .filter(Boolean)
+      .filter((item, idx, arr) => arr.indexOf(item) === idx)
+      .join(", ") ||
+    college.location ||
+    "Maharashtra";
 
   return (
     <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 hover:border-slate-300 hover:shadow-md transition-all duration-200 flex flex-col justify-between group shadow-sm">
       <div>
         {/* Card Header: Badges and Bookmark */}
         <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex flex-wrap gap-1.5">
-            {college.college_type && (
-              <span className="text-[11px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                {college.college_type}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {college.verification_status === "Verified" && (
+              <span className="text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3 text-emerald-600" />
+                Verified
               </span>
             )}
-            {college.primary_stream && (
-              <span className="text-[11px] font-semibold tracking-wide px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100">
-                {college.primary_stream}
+            {(college.institution_type || college.college_type) && (
+              <span className="text-[11px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {college.institution_type || college.college_type}
               </span>
             )}
+            {college.ownership && (
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-slate-50 text-slate-600 border border-slate-200">
+                {college.ownership}
+              </span>
+            )}
+            {college.autonomous_status &&
+              college.autonomous_status !== "Non-Autonomous" && (
+                <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                  {college.autonomous_status}
+                </span>
+              )}
             {college.naac_grade && (
               <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
                 ★ NAAC {college.naac_grade}
@@ -67,14 +92,16 @@ export function CollegeCard({ college }: { college: College }) {
               : college.entrance_exam
               ? [college.entrance_exam]
               : []
-            ).map((exam, exIdx) => (
-              <span
-                key={exIdx}
-                className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#FAFAFA] text-slate-700 border border-[#EAEAEA]"
-              >
-                {exam}
-              </span>
-            ))}
+            )
+              .slice(0, 2)
+              .map((exam, exIdx) => (
+                <span
+                  key={exIdx}
+                  className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[#FAFAFA] text-slate-700 border border-[#EAEAEA]"
+                >
+                  {exam}
+                </span>
+              ))}
           </div>
 
           <button
@@ -96,7 +123,7 @@ export function CollegeCard({ college }: { college: College }) {
           </button>
         </div>
 
-        {/* College Name & Location */}
+        {/* College Name & Affiliation & Location */}
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-[#FAFAFA] border border-[#EAEAEA] flex items-center justify-center text-slate-500 flex-shrink-0 group-hover:border-indigo-200 group-hover:text-indigo-600 transition-colors">
             <Building2 className="w-5 h-5" />
@@ -108,13 +135,23 @@ export function CollegeCard({ college }: { college: College }) {
               title={college.name}
             >
               {college.name}
+              {college.short_name && college.short_name !== college.name && (
+                <span className="ml-1.5 text-xs font-semibold text-slate-500 font-normal">
+                  ({college.short_name})
+                </span>
+              )}
             </Link>
+            {college.university_name && (
+              <p
+                className="text-[11px] text-slate-500 truncate mt-0.5 font-medium"
+                title={college.university_name}
+              >
+                {college.university_name}
+              </p>
+            )}
             <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
               <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-slate-400" />
-              <span className="truncate">
-                {college.location ? `${college.location}, ` : ""}
-                {college.state || "Maharashtra"}
-              </span>
+              <span className="truncate">{locationLabel}</span>
             </div>
           </div>
         </div>
@@ -138,13 +175,13 @@ export function CollegeCard({ college }: { college: College }) {
           ) : null}
         </Link>
 
-        {/* Stats Grid: Annual Tuition is NA unconditionally */}
+        {/* Stats Grid: Fees & Package */}
         <div className="grid grid-cols-2 gap-3 py-3 border-y border-[#F1F5F9] text-xs">
           <div>
             <span className="text-slate-500 block mb-0.5 text-[11px]">Annual Tuition</span>
             <span className="font-bold text-slate-900 flex items-center gap-0.5">
               <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-              NA
+              {formatCurrency(college.fees)}
             </span>
           </div>
           <div>
@@ -156,7 +193,7 @@ export function CollegeCard({ college }: { college: College }) {
           </div>
         </div>
 
-        {/* Concise Cutoff & Requirements Links */}
+        {/* Concise Cutoff & Admission Route Links */}
         <div className="pt-2.5 pb-1 flex items-center justify-between text-[11px] text-slate-500">
           <Link
             href={`/colleges/${college.id}#cutoffs`}
@@ -166,48 +203,56 @@ export function CollegeCard({ college }: { college: College }) {
           </Link>
           <span className="text-slate-300">•</span>
           <Link
-            href={`/colleges/${college.id}#admission-eligibility`}
+            href={`/colleges/${college.id}#admissions`}
             className="text-slate-600 hover:text-slate-900 font-medium hover:underline"
           >
-            View Requirements
+            Admissions
           </Link>
-          <span className="text-slate-300">•</span>
-          <span className="text-[10px] text-slate-400">
-            {college.accepted_exams?.join(" • ") || "MHT-CET"}
-          </span>
+          {college.admission_route && (
+            <>
+              <span className="text-slate-300">•</span>
+              <span className="text-[10px] text-slate-500 truncate max-w-[110px]" title={college.admission_route}>
+                {college.admission_route}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Placement Rate Progress */}
-        {college.placement_rate !== null && college.placement_rate !== undefined && (
-          <div className="mt-3.5">
-            <div className="flex items-center justify-between text-xs mb-1">
-              <span className="text-slate-500 flex items-center gap-1 font-medium">
-                <Award className="w-3.5 h-3.5 text-amber-500" />
-                Placement Rate
-              </span>
-              <span className="font-bold text-slate-900">
-                {college.placement_rate}%
-              </span>
+        {college.placement_rate !== null &&
+          college.placement_rate !== undefined &&
+          college.placement_rate > 0 && (
+            <div className="mt-3.5">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="text-slate-500 flex items-center gap-1 font-medium">
+                  <Award className="w-3.5 h-3.5 text-amber-500" />
+                  Placement Rate
+                </span>
+                <span className="font-bold text-slate-900">
+                  {college.placement_rate}%
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 to-violet-600 rounded-full transition-all"
+                  style={{ width: `${Math.min(college.placement_rate, 100)}%` }}
+                />
+              </div>
             </div>
-            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 to-violet-600 rounded-full transition-all"
-                style={{ width: `${Math.min(college.placement_rate, 100)}%` }}
-              />
-            </div>
-          </div>
-        )}
+          )}
       </div>
 
       {/* Footer actions: Highest package, Official Website link & View details */}
       <div className="mt-4 pt-3 border-t border-[#F1F5F9] flex items-center justify-between gap-2">
         <div className="text-[11px] text-slate-500 truncate">
-          {college.highest_package ? (
+          {college.highest_package && college.highest_package > 0 ? (
             <span>
               Highest: <strong className="text-slate-900 font-bold">{formatCurrency(college.highest_package)}</strong>
             </span>
           ) : (
-            <span className="text-slate-400">Accredited</span>
+            <span className="text-slate-400">
+              {college.verification_status === "Verified" ? "Official Records" : "Higher Education"}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

@@ -29,6 +29,11 @@ export interface StudentCareerContextParams {
 export interface EvaluatedCollegeContext {
   name: string;
   location: string;
+  district?: string;
+  taluka?: string;
+  universityName?: string;
+  autonomousStatus?: boolean | string | null;
+  naacGrade?: string;
   stream: string;
   collegeType: string;
   officialWebsite: string | null;
@@ -77,6 +82,11 @@ export interface SanitizedStudentContext {
   isDemo: boolean;
   academicProfile: {
     preferredBranch: string;
+    preferredField: string;
+    preferredDegreeLevel: string;
+    preferredDegree: string;
+    preferredDistrict: string;
+    preferredUniversity: string;
     entranceScore: string;
     entranceScoreNumeric: number | null;
     entranceExam: string;
@@ -220,6 +230,11 @@ export function buildSanitizedContext(params: StudentCareerContextParams): Sanit
     return {
       name: item.title,
       location: col?.location || "Pune",
+      district: col?.district || undefined,
+      taluka: col?.taluka || undefined,
+      universityName: col?.university_name || undefined,
+      autonomousStatus: col?.autonomous_status || undefined,
+      naacGrade: col?.naac_grade || undefined,
       stream: col?.primary_stream || "Engineering",
       collegeType: col?.college_type || "Autonomous",
       officialWebsite: col?.official_website || null,
@@ -298,6 +313,11 @@ export function buildSanitizedContext(params: StudentCareerContextParams): Sanit
     isDemo: Boolean(isDemo),
     academicProfile: {
       preferredBranch,
+      preferredField: studentProfile?.preferred_field?.trim() || "Not specified",
+      preferredDegreeLevel: studentProfile?.preferred_degree_level?.trim() || "Not specified",
+      preferredDegree: studentProfile?.preferred_degree?.trim() || "Not specified",
+      preferredDistrict: studentProfile?.preferred_district?.trim() || "Pune",
+      preferredUniversity: studentProfile?.preferred_university?.trim() || "Not specified",
       entranceScore,
       entranceScoreNumeric,
       entranceExam,
@@ -353,8 +373,15 @@ export function buildSystemInstruction(sanitized: SanitizedStudentContext): stri
         }).join("; ")
       : c.targetProgram;
 
+    const extraTags = [
+      c.district ? `District: ${c.district}` : null,
+      c.universityName ? `Affiliated: ${c.universityName}` : null,
+      c.autonomousStatus ? `Autonomous` : null,
+      c.naacGrade ? `NAAC: ${c.naacGrade}` : null,
+    ].filter(Boolean).join(", ");
+
     const colStatusStr = c.admissionVerificationStatus ? ` [Admission Status: ${c.admissionVerificationStatus}]` : "";
-    return `• ${c.name} (${c.location})${colStatusStr} — Target: ${c.targetProgram} [Status: ${c.cutoffStatus}, Match: ${c.matchScore}%]\n  Accepted Exams: ${c.acceptedExams.join(", ")}\n  Admission Route: ${c.admissionRoute}\n  Eligibility: ${c.eligibilityCriteria}\n  Programs: ${progList}`;
+    return `• ${c.name} (${c.location || c.district || "Pune"})${extraTags ? ` [${extraTags}]` : ""}${colStatusStr} — Target: ${c.targetProgram} [Status: ${c.cutoffStatus}, Match: ${c.matchScore}%]\n  Accepted Exams: ${c.acceptedExams.join(", ")}\n  Admission Route: ${c.admissionRoute}\n  Eligibility: ${c.eligibilityCriteria}\n  Programs: ${progList}`;
   }).join("\n");
 
   return `You are "EduSphere AI — Academic & Career Guidance Assistant", an intelligent, factual, and strictly data-grounded advisor for higher education admissions and career placement.
@@ -364,6 +391,8 @@ AUTHENTICATED STUDENT CONTEXT (VERIFIED SUPABASE DATA)
 ==================================================
 - Student Name: ${sanitized.studentName} ${sanitized.isDemo ? "(Viewing Demo Preview)" : ""}
 - Target Stream / Branch: ${sanitized.academicProfile.preferredBranch}
+- Preferred Academic Field: ${sanitized.academicProfile.preferredField} (Degree: ${sanitized.academicProfile.preferredDegree}, Level: ${sanitized.academicProfile.preferredDegreeLevel})
+- Preferred District & Affiliation: ${sanitized.academicProfile.preferredDistrict} (Affiliated University: ${sanitized.academicProfile.preferredUniversity})
 - Entrance Exam: ${sanitized.academicProfile.entranceExam}
 - Entrance Exam Percentile / Score: ${sanitized.academicProfile.entranceScore}
 - Category: ${sanitized.academicProfile.category}
@@ -479,5 +508,10 @@ ASSISTANT GUIDELINES & BEHAVIORAL RULES
    - NEVER accept requests to view, search, or expose another student's private profile, CGPA, or data. Politely decline any such requests citing student privacy protection.
 
 9. FORMATTING & STYLE:
-   - Use clean, concise markdown: bold terms, structured bullet points, and compact comparison tables when contrasting colleges. Keep responses student-friendly, actionable, and encouraging.`;
+   - Use clean, concise markdown: bold terms, structured bullet points, and compact comparison tables when contrasting colleges. Keep responses student-friendly, actionable, and encouraging.
+
+10. LIVE MAHARASHTRA HIGHER-EDUCATION DATASET:
+   - Ground all guidance in the live verified Maharashtra dataset comprising 340 colleges/institutions (281 across Pune district), 245 approved courses, 162 cutoffs, 40 universities (notably Savitribai Phule Pune University), 47 facilities, 19 accreditations, and 34 placement metrics.
+   - FRA TUITION FEES DISCLOSURE: For private unaided colleges where exact fee rows are absent, tuition fees are statutorily regulated and finalized each academic cycle by the Fees Regulating Authority (FRA) Maharashtra. NEVER fabricate fee figures.
+   - DUAL PLACEMENT DATA: Dataset includes corporate recruitment drives as well as official NIRF aggregate metrics (e.g. Vishwakarma University).`;
 }

@@ -1,22 +1,29 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { useAuth } from "@/context/AuthContext";
-import { Profile, StudentProfile } from "@/types";
-import { User, BookOpen, Award, Sparkles, Plus, X, CheckCircle, AlertCircle } from "@/components/icons";
-
-const SUGGESTED_BRANCHES = [
-  "Computer Science & Engineering",
-  "Information Technology",
-  "Artificial Intelligence & Data Science",
-  "Electronics & Telecommunication",
-  "Mechanical Engineering",
-  "Electrical Engineering",
-  "Civil Engineering",
-  "Biotechnology",
-  "Management / MBA",
-];
+import { Profile, StudentProfile, College, CanonicalProgram } from "@/types";
+import {
+  User,
+  Award,
+  Sparkles,
+  Plus,
+  X,
+  CheckCircle,
+  AlertCircle,
+  MapPin,
+  GraduationCap,
+} from "@/components/icons";
+import { getColleges, getPrograms } from "@/lib/supabase/colleges";
+import {
+  getAvailableDistricts,
+  getAvailableUniversities,
+  getAvailableFields,
+  getAvailableDegreeLevels,
+  getAvailableDegrees,
+  getAvailablePrograms,
+} from "@/lib/academic-hierarchy";
 
 const SUGGESTED_SKILLS = [
   "Python",
@@ -33,18 +40,6 @@ const SUGGESTED_SKILLS = [
   "Figma",
   "Docker",
   "Git",
-];
-
-const POPULAR_LOCATIONS = [
-  "Maharashtra",
-  "Karnataka",
-  "Delhi NCR",
-  "Telangana",
-  "Tamil Nadu",
-  "Gujarat",
-  "West Bengal",
-  "Punjab",
-  "Rajasthan",
 ];
 
 const SUGGESTED_CAREER_GOALS = [
@@ -70,6 +65,11 @@ interface ProfileFormInnerProps {
     preferredLocation?: string | null;
     cgpa?: number | null;
     careerGoal?: string | null;
+    preferredField?: string | null;
+    preferredDegreeLevel?: string | null;
+    preferredDegree?: string | null;
+    preferredDistrict?: string | null;
+    preferredUniversity?: string | null;
     skills?: string[];
   }) => Promise<{ success: boolean; error?: string }>;
 }
@@ -82,9 +82,35 @@ function ProfileFormInner({
   updateProfile,
 }: ProfileFormInnerProps) {
   const [fullName, setFullName] = useState(profile?.full_name || "");
-  const [preferredBranch, setPreferredBranch] = useState(studentProfile?.preferred_branch || "");
+
+  // Academic Hierarchy States
+  const [preferredField, setPreferredField] = useState(
+    studentProfile?.preferred_field || ""
+  );
+  const [preferredDegreeLevel, setPreferredDegreeLevel] = useState(
+    studentProfile?.preferred_degree_level || ""
+  );
+  const [preferredDegree, setPreferredDegree] = useState(
+    studentProfile?.preferred_degree || ""
+  );
+  const [preferredBranch, setPreferredBranch] = useState(
+    studentProfile?.preferred_branch || ""
+  );
+
+  // Geographic & University States
+  const [preferredDistrict, setPreferredDistrict] = useState(
+    studentProfile?.preferred_district ||
+      studentProfile?.preferred_location ||
+      "Pune"
+  );
+  const [preferredUniversity, setPreferredUniversity] = useState(
+    studentProfile?.preferred_university || ""
+  );
+
+  // Academic Performance & Career States
   const [entranceScore, setEntranceScore] = useState<string>(
-    studentProfile?.entrance_score !== null && studentProfile?.entrance_score !== undefined
+    studentProfile?.entrance_score !== null &&
+      studentProfile?.entrance_score !== undefined
       ? studentProfile.entrance_score.toString()
       : ""
   );
@@ -93,14 +119,89 @@ function ProfileFormInner({
       ? studentProfile.cgpa.toString()
       : ""
   );
-  const [preferredLocation, setPreferredLocation] = useState(studentProfile?.preferred_location || "");
-  const [careerGoal, setCareerGoal] = useState(studentProfile?.career_goal || "");
+  const [careerGoal, setCareerGoal] = useState(
+    studentProfile?.career_goal || ""
+  );
   const [skillsList, setSkillsList] = useState<string[]>(initialSkills || []);
   const [skillInput, setSkillInput] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Live master reference datasets for cascading selections
+  const [colleges, setColleges] = useState<College[]>([]);
+  const [canonicalPrograms, setCanonicalPrograms] = useState<CanonicalProgram[]>(
+    []
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadReferenceData() {
+      try {
+        const [colRes, progRes] = await Promise.all([
+          getColleges(),
+          getPrograms(),
+        ]);
+        if (!isMounted) return;
+        if (colRes.data) setColleges(colRes.data);
+        if (progRes.data) setCanonicalPrograms(progRes.data);
+      } catch (e) {
+        console.warn("Reference data load note:", e);
+      }
+    }
+    loadReferenceData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Cascading Geographic & University Options
+  const availableDistricts = useMemo(() => {
+    return getAvailableDistricts(colleges);
+  }, [colleges]);
+
+  const availableUniversities = useMemo(() => {
+    if (preferredDistrict) {
+      const set = new Set<string>();
+      colleges
+        .filter(
+          (c) =>
+            c.district?.toLowerCase() === preferredDistrict.toLowerCase() ||
+            c.location?.toLowerCase().includes(preferredDistrict.toLowerCase())
+        )
+        .forEach((c) => {
+          if (c.university_name) set.add(c.university_name.trim());
+        });
+      if (set.size > 0) return Array.from(set).sort();
+    }
+    return getAvailableUniversities(colleges);
+  }, [colleges, preferredDistrict]);
+
+  // Cascading Academic Hierarchy Options
+  const availableFields = useMemo(() => {
+    return getAvailableFields(canonicalPrograms);
+  }, [canonicalPrograms]);
+
+  const availableDegreeLevels = useMemo(() => {
+    return getAvailableDegreeLevels(canonicalPrograms, preferredField);
+  }, [canonicalPrograms, preferredField]);
+
+  const availableDegrees = useMemo(() => {
+    return getAvailableDegrees(
+      canonicalPrograms,
+      preferredField,
+      preferredDegreeLevel
+    );
+  }, [canonicalPrograms, preferredField, preferredDegreeLevel]);
+
+  const availableProgramsList = useMemo(() => {
+    return getAvailablePrograms(
+      canonicalPrograms,
+      preferredField,
+      preferredDegree
+    );
+  }, [canonicalPrograms, preferredField, preferredDegree]);
 
   const handleAddSkill = (skillToAdd: string) => {
     const trimmed = skillToAdd.trim();
@@ -112,7 +213,9 @@ function ProfileFormInner({
   };
 
   const handleRemoveSkill = (skillToRemove: string) => {
-    setSkillsList(skillsList.filter((s) => s.toLowerCase() !== skillToRemove.toLowerCase()));
+    setSkillsList(
+      skillsList.filter((s) => s.toLowerCase() !== skillToRemove.toLowerCase())
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -122,18 +225,26 @@ function ProfileFormInner({
     setErrorMsg("");
 
     try {
-      const parsedScore = entranceScore.trim() ? parseFloat(entranceScore) : null;
+      const parsedScore = entranceScore.trim()
+        ? parseFloat(entranceScore)
+        : null;
       const parsedCgpa = cgpa.trim() ? parseFloat(cgpa) : null;
 
       // Validate CGPA range (0.00 - 10.00)
-      if (parsedCgpa !== null && (isNaN(parsedCgpa) || parsedCgpa < 0 || parsedCgpa > 10)) {
+      if (
+        parsedCgpa !== null &&
+        (isNaN(parsedCgpa) || parsedCgpa < 0 || parsedCgpa > 10)
+      ) {
         setErrorMsg("Please enter a valid CGPA between 0.00 and 10.00");
         setSaving(false);
         return;
       }
 
       // Validate entrance score range (0 - 1000)
-      if (parsedScore !== null && (isNaN(parsedScore) || parsedScore < 0 || parsedScore > 1000)) {
+      if (
+        parsedScore !== null &&
+        (isNaN(parsedScore) || parsedScore < 0 || parsedScore > 1000)
+      ) {
         setErrorMsg("Please enter a valid entrance score between 0 and 1000");
         setSaving(false);
         return;
@@ -143,14 +254,22 @@ function ProfileFormInner({
         fullName: fullName.trim(),
         cgpa: parsedCgpa,
         entranceScore: parsedScore,
-        preferredBranch: preferredBranch.trim() || null,
-        preferredLocation: preferredLocation.trim() || null,
+        preferredBranch:
+          preferredBranch.trim() || preferredDegree.trim() || null,
+        preferredLocation: preferredDistrict.trim() || null,
         careerGoal: careerGoal.trim() || null,
+        preferredField: preferredField.trim() || null,
+        preferredDegreeLevel: preferredDegreeLevel.trim() || null,
+        preferredDegree: preferredDegree.trim() || null,
+        preferredDistrict: preferredDistrict.trim() || null,
+        preferredUniversity: preferredUniversity.trim() || null,
         skills: skillsList,
       });
 
       if (res.success) {
-        setSuccessMsg("Profile, academic details, and skills updated successfully!");
+        setSuccessMsg(
+          "Profile, cascading academic hierarchy, and preferences updated successfully!"
+        );
         setTimeout(() => setSuccessMsg(""), 5000);
       } else {
         const friendlyError = res.error?.includes("violates")
@@ -159,7 +278,8 @@ function ProfileFormInner({
         setErrorMsg(friendlyError);
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to update profile.";
+      const msg =
+        err instanceof Error ? err.message : "Failed to update profile.";
       setErrorMsg(msg);
     } finally {
       setSaving(false);
@@ -182,7 +302,7 @@ function ProfileFormInner({
         </div>
       )}
 
-      {/* Basic Information Section */}
+      {/* 1. Basic Account Information */}
       <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
           <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
@@ -193,7 +313,7 @@ function ProfileFormInner({
               Personal Information
             </h2>
             <p className="text-xs text-slate-500">
-              Basic account details associated with your profile
+              Basic account identity associated with your verified profile
             </p>
           </div>
         </div>
@@ -230,43 +350,190 @@ function ProfileFormInner({
         </div>
       </div>
 
-      {/* Academic & Career Preferences */}
+      {/* 2. Cascading Academic Hierarchy Preferences */}
       <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
           <div className="w-10 h-10 rounded-xl bg-violet-50 border border-violet-100 text-violet-600 flex items-center justify-center">
-            <BookOpen className="w-5 h-5" />
+            <GraduationCap className="w-5 h-5" />
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
-              Academic & Entrance Details
+              Academic Hierarchy & Target Degree
             </h2>
             <p className="text-xs text-slate-500">
-              Used by EduSphere AI to recommend matching colleges and admission cutoffs
+              Cascading fields powering smart fit matching across Maharashtra&apos;s 340+ institutions
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Preferred Branch */}
+          {/* Level 1: Preferred Field / Stream */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-2">
-              Preferred Branch / Stream
+              Academic Discipline / Field
+            </label>
+            <select
+              value={preferredField}
+              onChange={(e) => {
+                setPreferredField(e.target.value);
+                setPreferredDegree("");
+                setPreferredBranch("");
+              }}
+              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
+            >
+              <option value="">Select Academic Field...</option>
+              {availableFields.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Level 2: Degree Level */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Degree Level
+            </label>
+            <select
+              value={preferredDegreeLevel}
+              onChange={(e) => {
+                setPreferredDegreeLevel(e.target.value);
+                setPreferredDegree("");
+                setPreferredBranch("");
+              }}
+              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
+            >
+              <option value="">Select Degree Level...</option>
+              {availableDegreeLevels.map((lvl) => (
+                <option key={lvl} value={lvl}>
+                  {lvl}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Level 3: Target Degree */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Target Degree Award
+            </label>
+            <select
+              value={preferredDegree}
+              onChange={(e) => {
+                setPreferredDegree(e.target.value);
+                if (!preferredBranch) setPreferredBranch(e.target.value);
+              }}
+              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
+            >
+              <option value="">Select Degree...</option>
+              {availableDegrees.map((deg) => (
+                <option key={deg} value={deg}>
+                  {deg}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Level 4: Target Branch / Specialization */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Target Branch / Specialization
             </label>
             <input
               type="text"
-              list="branches-list"
+              list="programs-datalist"
               value={preferredBranch}
               onChange={(e) => setPreferredBranch(e.target.value)}
-              placeholder="e.g. Computer Science"
+              placeholder="e.g. Computer Engineering, BCA, BBA"
               className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
             />
-            <datalist id="branches-list">
-              {SUGGESTED_BRANCHES.map((b, i) => (
-                <option key={i} value={b} />
+            <datalist id="programs-datalist">
+              {availableProgramsList.map((prog, i) => (
+                <option key={i} value={prog} />
               ))}
             </datalist>
           </div>
+        </div>
+      </div>
 
+      {/* 3. Geographic & University Preferences */}
+      <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
+          <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center">
+            <MapPin className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+              Geographic Region & University Affiliation
+            </h2>
+            <p className="text-xs text-slate-500">
+              Focus recommendations within your preferred educational district
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Preferred District */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Preferred District (Maharashtra)
+            </label>
+            <select
+              value={preferredDistrict}
+              onChange={(e) => {
+                setPreferredDistrict(e.target.value);
+                setPreferredUniversity("");
+              }}
+              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
+            >
+              <option value="">All Maharashtra Districts</option>
+              {availableDistricts.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Preferred University */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-2">
+              Preferred University
+            </label>
+            <select
+              value={preferredUniversity}
+              onChange={(e) => setPreferredUniversity(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs truncate"
+            >
+              <option value="">Any Accredited University</option>
+              {availableUniversities.map((u) => (
+                <option key={u} value={u} title={u}>
+                  {u}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Academic Performance & Career Goals */}
+      <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 shadow-sm">
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
+          <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center">
+            <Award className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight">
+              Entrance Exam & Performance Metrics
+            </h2>
+            <p className="text-xs text-slate-500">
+              Evaluated against official CAP opening/closing ranks
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {/* Entrance Score */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-2">
@@ -288,7 +555,7 @@ function ProfileFormInner({
               </div>
             </div>
             <span className="text-[11px] text-slate-400 mt-1 block">
-              JEE, CET, or Academic Marks
+              MHT-CET percentile, JEE Main, or qualifying merit score
             </span>
           </div>
 
@@ -310,28 +577,8 @@ function ProfileFormInner({
               />
             </div>
             <span className="text-[11px] text-slate-400 mt-1 block">
-              Cumulative score (0.00 – 10.00) used for placement eligibility & AI guidance
+              Score (0.00 – 10.00) used for placement eligibility & AI guidance
             </span>
-          </div>
-
-          {/* Preferred Location */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              Preferred Study / Work Location
-            </label>
-            <input
-              type="text"
-              list="locations-list"
-              value={preferredLocation}
-              onChange={(e) => setPreferredLocation(e.target.value)}
-              placeholder="e.g. Maharashtra, Karnataka, or Bangalore"
-              className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
-            />
-            <datalist id="locations-list">
-              {POPULAR_LOCATIONS.map((loc, i) => (
-                <option key={i} value={loc} />
-              ))}
-            </datalist>
           </div>
 
           {/* Target Career Role / Goal */}
@@ -344,7 +591,7 @@ function ProfileFormInner({
               list="career-goals-list"
               value={careerGoal}
               onChange={(e) => setCareerGoal(e.target.value)}
-              placeholder="e.g. Full Stack Developer, AI Engineer, or Data Scientist"
+              placeholder="e.g. Full Stack Developer, AI Engineer, or Corporate Lawyer"
               className="w-full px-4 py-2.5 rounded-xl border border-[#EAEAEA] bg-white text-slate-900 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition shadow-xs"
             />
             <datalist id="career-goals-list">
@@ -352,14 +599,11 @@ function ProfileFormInner({
                 <option key={i} value={goal} />
               ))}
             </datalist>
-            <span className="text-[11px] text-slate-400 mt-1 block">
-              Helps EduSphere AI tailor your milestone roadmap and internship recommendations
-            </span>
           </div>
         </div>
       </div>
 
-      {/* Skills & Competencies */}
+      {/* 5. Skills & Competencies */}
       <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 shadow-sm">
         <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
           <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center">
@@ -423,7 +667,7 @@ function ProfileFormInner({
           <button
             type="button"
             onClick={() => handleAddSkill(skillInput)}
-            className="px-5 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-medium transition flex items-center gap-1.5 shadow-xs"
+            className="px-5 py-2.5 bg-slate-900 hover:bg-black text-white rounded-xl text-sm font-medium transition flex items-center gap-1.5 shadow-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             Add
@@ -437,13 +681,16 @@ function ProfileFormInner({
           </span>
           <div className="flex flex-wrap gap-1.5">
             {SUGGESTED_SKILLS.filter(
-              (s) => !skillsList.some((cur) => cur.toLowerCase() === s.toLowerCase())
+              (s) =>
+                !skillsList.some(
+                  (cur) => cur.toLowerCase() === s.toLowerCase()
+                )
             ).map((skill) => (
               <button
                 key={skill}
                 type="button"
                 onClick={() => handleAddSkill(skill)}
-                className="text-xs px-2.5 py-1 rounded-md bg-[#FAFAFA] border border-[#EAEAEA] hover:border-slate-300 hover:text-slate-900 text-slate-600 transition"
+                className="text-xs px-2.5 py-1 rounded-md bg-[#FAFAFA] border border-[#EAEAEA] hover:border-slate-300 hover:text-slate-900 text-slate-600 transition cursor-pointer"
               >
                 + {skill}
               </button>
@@ -483,6 +730,11 @@ export function ProfileForm() {
     studentProfile?.entrance_score ?? "",
     studentProfile?.cgpa ?? "",
     studentProfile?.preferred_location || "",
+    studentProfile?.preferred_field || "",
+    studentProfile?.preferred_degree_level || "",
+    studentProfile?.preferred_degree || "",
+    studentProfile?.preferred_district || "",
+    studentProfile?.preferred_university || "",
     studentProfile?.career_goal || "",
     skills.join(","),
   ].join("::");

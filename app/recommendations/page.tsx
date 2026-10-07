@@ -159,8 +159,9 @@ export default function RecommendationsPage() {
       if (item.target_program_name) {
         branches.add(item.target_program_name);
       }
-      if (item.college?.location) {
-        locations.add(item.college.location);
+      const loc = item.college?.district || item.college?.location;
+      if (loc) {
+        locations.add(loc);
       }
       if (item.cutoff_status === "Cutoff compatible") compatibleCount++;
       else if (item.cutoff_status === "Cutoff not met") notMetCount++;
@@ -184,8 +185,11 @@ export default function RecommendationsPage() {
       if (collegeBranchFilter !== "all" && item.target_program_name !== collegeBranchFilter) {
         return false;
       }
-      if (collegeLocationFilter !== "all" && item.college?.location !== collegeLocationFilter) {
-        return false;
+      if (collegeLocationFilter !== "all") {
+        const loc = item.college?.district || item.college?.location;
+        if (loc !== collegeLocationFilter) {
+          return false;
+        }
       }
       return true;
     });

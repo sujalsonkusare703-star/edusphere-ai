@@ -190,6 +190,11 @@ export function computeCollegeGuidance(
 ): RecommendationItem[] {
   const targetBranch = studentProfile?.preferred_branch?.toLowerCase().trim() || "";
   const targetLocation = studentProfile?.preferred_location?.toLowerCase().trim() || "";
+  const preferredField = studentProfile?.preferred_field?.toLowerCase().trim() || "";
+  const preferredDegreeLevel = studentProfile?.preferred_degree_level?.toLowerCase().trim() || "";
+  const preferredDegree = studentProfile?.preferred_degree?.toLowerCase().trim() || "";
+  const preferredDistrict = studentProfile?.preferred_district?.toLowerCase().trim() || "";
+  const preferredUniversity = studentProfile?.preferred_university?.toLowerCase().trim() || "";
   const studentExam = studentProfile?.entrance_exam?.trim() || "";
   const studentExamKey = studentExam ? normalizeExamKey(studentExam) : "";
   const studentCategoryRaw = studentProfile?.category?.trim().toUpperCase() || "";
@@ -221,10 +226,12 @@ export function computeCollegeGuidance(
     let matchedCourseObject: CollegeCourse | null = null;
 
     if (college.courses && college.courses.length > 0) {
-      // Find course aligning with student's preferred branch
+      // Find course aligning with student's preferred branch, degree, or field
       const rankedCourses = college.courses.map((crs) => {
         const cName = crs.course_name.toLowerCase();
-        const cStream = crs.stream.toLowerCase();
+        const cStream = (crs.stream || "").toLowerCase();
+        const cDegree = (crs.degree || "").toLowerCase();
+        const cDegreeLevel = (crs.degree_level || "").toLowerCase();
         let rank = 0;
 
         if (targetBranch) {
@@ -264,6 +271,17 @@ export function computeCollegeGuidance(
           } else if (cStream === targetBranch || targetBranch.includes(cStream)) {
             rank = 75;
           }
+        }
+
+        // Additional rank weighting for student's preferred degree, field, and level
+        if (preferredDegree && (cDegree.includes(preferredDegree) || cName.includes(preferredDegree) || preferredDegree.includes(cDegree))) {
+          rank += 25;
+        }
+        if (preferredField && (cStream.includes(preferredField) || preferredField.includes(cStream))) {
+          rank += 20;
+        }
+        if (preferredDegreeLevel && (cDegreeLevel.includes(preferredDegreeLevel) || preferredDegreeLevel.includes(cDegreeLevel))) {
+          rank += 10;
         }
 
         // Prioritize courses with real cutoffs matching student's exam if rank tie
@@ -603,6 +621,18 @@ export function computeCollegeGuidance(
       academicMatchScore = 76;
     }
 
+    if (college.autonomous_status) {
+      academicMatchScore = Math.min(100, academicMatchScore + 3);
+      reasons.push("Autonomous institution approved by UGC/State");
+    }
+
+    if (preferredUniversity && college.university_name && college.university_name.toLowerCase().includes(preferredUniversity)) {
+      academicMatchScore = Math.min(100, academicMatchScore + 6);
+      reasons.push(`Affiliated with ${college.university_name}`);
+    } else if (college.university_name) {
+      reasons.push(`Affiliated with ${college.university_name}`);
+    }
+
     if (college.placement_rate && college.placement_rate >= 85) {
       academicMatchScore = Math.min(100, academicMatchScore + 4);
       reasons.push(`Proven ${college.placement_rate}% campus placement track record`);
@@ -638,10 +668,22 @@ export function computeCollegeGuidance(
     // STEP 5: Location Preference
     // -------------------------------------------------------------
     let locationMatchScore = 75;
-    if (targetLocation) {
-      if (locLower.includes(targetLocation) || targetLocation.includes(locLower)) {
+    const distLower = (college.district || "").toLowerCase();
+
+    if (preferredDistrict) {
+      if (distLower === preferredDistrict || locLower.includes(preferredDistrict) || distLower.includes(preferredDistrict)) {
+        locationMatchScore = 98;
+        reasons.push(`Located in your preferred district (${college.district || college.location}${college.taluka ? `, ${college.taluka} Taluka` : ""})`);
+      } else if (targetLocation && (locLower.includes(targetLocation) || stateLower.includes(targetLocation))) {
+        locationMatchScore = 86;
+        reasons.push(`Located in ${college.district || college.location ? `${college.district || college.location}, ` : ""}${college.state || "Maharashtra"}`);
+      } else {
+        locationMatchScore = 65;
+      }
+    } else if (targetLocation) {
+      if (locLower.includes(targetLocation) || targetLocation.includes(locLower) || distLower.includes(targetLocation)) {
         locationMatchScore = 96;
-        reasons.push(`Located in your preferred region (${college.location ? `${college.location}, ` : ""}${college.state || "Maharashtra"})`);
+        reasons.push(`Located in your preferred region (${college.district || college.location ? `${college.district || college.location}, ` : ""}${college.state || "Maharashtra"})`);
       } else if (stateLower.includes(targetLocation) || targetLocation.includes(stateLower)) {
         locationMatchScore = 85;
         reasons.push(`Located in ${college.state || "Maharashtra"} State`);
@@ -684,11 +726,13 @@ export function computeCollegeGuidance(
       : "State CET Cell Maharashtra / Official Institutional Portals (EduSphere Verified Dataset)";
     reasons.push(`Cutoff source: ${sourceAttribution}`);
 
+    const displayLocation = college.district || college.location || "Maharashtra";
+
     return {
       id: college.id,
       item_type: "college" as const,
       title: college.name,
-      subtitle: `${matchedCourseName} • ${college.location ? `${college.location}, ` : ""}${college.state || "Maharashtra"}`,
+      subtitle: `${matchedCourseName} • ${displayLocation}, ${college.state || "Maharashtra"}`,
       match_score: finalScore,
       match_reasons: reasons,
       college,
@@ -874,8 +918,8 @@ export function computePlacementGuidance(
     return {
       id: placement.id,
       item_type: "placement" as const,
-      title: placement.role,
-      subtitle: `${placement.company} • ${placement.industry || "Technology"} • ${placement.location || "Pan-India"}`,
+      title: placement.role || (placement.metric_name ? `NIRF ${placement.metric_name}` : "Placement Opportunity"),
+      subtitle: `${placement.company || "Institutional Metric"} • ${placement.industry || "Technology"} • ${placement.location || "Pan-India"}`,
       match_score: finalScore,
       match_reasons: reasons,
       placement,
@@ -943,7 +987,9 @@ export function computeSkillGapAnalysis(
   });
 
   placements.forEach((item) => {
-    (item.skills || []).forEach((s) => recordMarketSkill(s, item.role, item.company));
+    (item.skills || []).forEach((s) =>
+      recordMarketSkill(s, item.role || "Placement Candidate", item.company || "Enterprise Recruiter")
+    );
   });
 
   // Identify recommended missing skills (only those NOT present in studentSkillsLower)
@@ -1239,10 +1285,10 @@ export function computePlacementReadinessMetrics(
 
     if (isEligible) {
       eligibleCount += 1;
-      eligibleCompanies.push(item.company);
+      if (item.company) eligibleCompanies.push(item.company);
     } else {
       blockedByCgpaCount += 1;
-      cgpaGapCompanies.push(item.company);
+      if (item.company) cgpaGapCompanies.push(item.company);
     }
 
     const reqSkills = item.skills || [];

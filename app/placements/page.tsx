@@ -89,7 +89,7 @@ export default function PlacementsPage() {
 
       if (selectedIndustry && item.industry !== selectedIndustry) return false;
 
-      if (maxCgpaFilter !== "" && item.min_cgpa !== null) {
+      if (maxCgpaFilter !== "" && item.min_cgpa !== null && item.min_cgpa !== undefined) {
         if (item.min_cgpa > Number(maxCgpaFilter)) return false;
       }
 

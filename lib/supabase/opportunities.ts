@@ -1,8 +1,9 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { College, CollegeCourse, CollegeCutoff, Internship, Placement, RecommendationItem, VerificationStatus, CutoffUnit, CollegeSourceRegistry } from "@/types";
+import { College, CollegeCourse, Internship, Placement, RecommendationItem, VerificationStatus, CollegeSourceRegistry } from "@/types";
 import { dbUuidToItemId, itemIdToDbUuid, isUuid } from "./db-helpers";
 
-import { EDUSPHERE_COLLEGES_DATASET } from "@/lib/data/edusphere-colleges-dataset";
+import { getColleges, getCollegeById } from "./colleges";
+export * from "./colleges";
 
 export interface DatabaseCollegeRow {
   id: string;
@@ -27,6 +28,25 @@ export interface DatabaseCollegeRow {
   admission_source_name?: string | null;
   admission_source_url?: string | null;
   admission_verification_status?: string | null;
+  university_id?: number | null;
+  university_name?: string | null;
+  university?: string | null;
+  district?: string | null;
+  taluka?: string | null;
+  city?: string | null;
+  address?: string | null;
+  pin_code?: string | null;
+  institution_type?: string | null;
+  ownership?: string | null;
+  established_year?: number | string | null;
+  autonomous_status?: string | null;
+  admission_url?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
+  verification_status?: string | null;
+  last_verified_at?: string | null;
+  academic_year?: string | null;
+  notes?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -290,6 +310,24 @@ export function mapDatabaseCollege(
     admission_verification_status: (row.admission_verification_status as VerificationStatus) || deriveAdmissionStatus(row),
     courses_count: courses.length,
     courses: courses.length > 0 ? courses : undefined,
+    university_id: row.university_id !== undefined ? row.university_id : null,
+    university_name: row.university_name || row.university || null,
+    district: row.district || null,
+    taluka: row.taluka || null,
+    city: row.city || null,
+    address: row.address || null,
+    pin_code: row.pin_code || null,
+    institution_type: row.institution_type || null,
+    ownership: row.ownership || null,
+    established_year: row.established_year !== undefined ? row.established_year : null,
+    autonomous_status: row.autonomous_status || null,
+    admission_url: row.admission_url || null,
+    contact_email: row.contact_email || null,
+    contact_phone: row.contact_phone || null,
+    verification_status: row.verification_status || (row.admission_verification_status as VerificationStatus) || deriveAdmissionStatus(row),
+    last_verified_at: row.last_verified_at || null,
+    academic_year: row.academic_year || null,
+    notes: row.notes || null,
   };
 }
 
@@ -328,257 +366,11 @@ export function mapDatabasePlacement(row: DatabasePlacementRow, skills: string[]
  * Fetches all colleges from Supabase public.colleges, including normalized courses, cutoffs, and programs.
  */
 export async function fetchColleges(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  options?: { isDemo?: boolean }
 ): Promise<{ data: College[]; error: string | null }> {
-  try {
-    const { data, error } = await supabase
-      .from("colleges")
-      .select("*")
-      .order("name", { ascending: true });
-
-    if (error) {
-      console.warn("Error fetching colleges from Supabase, falling back to authoritative dataset:", error.message);
-      return { data: EDUSPHERE_COLLEGES_DATASET, error: null };
-    }
-
-    const rawRows = (data as DatabaseCollegeRow[]) || [];
-    // Purge any demo colleges and duplicate legacy GCOEP row
-    const collegeRows = rawRows.filter((c) => {
-      if (!c.name) return false;
-      const nameLower = c.name.toLowerCase().trim();
-      if (
-        nameLower.startsWith("demo ") ||
-        nameLower.includes("demo college") ||
-        nameLower.includes("demo institute") ||
-        nameLower.includes("demo school")
-      ) {
-        return false;
-      }
-      if (
-        c.id === "00000000-0000-0000-0002-000000000002" ||
-        (nameLower === "government college of engineering pune" && c.id !== "00000000-0000-0000-0000-00636f6c2d32")
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-    const collegeIds = collegeRows.map((c) => c.id).filter(Boolean);
-
-    // Fetch courses from public.college_courses
-    const coursesMap: Record<string, CollegeCourse[]> = {};
-    if (collegeIds.length > 0) {
-      try {
-        const { data: courseData, error: courseErr } = await supabase
-          .from("college_courses")
-          .select("*")
-          .in("college_id", collegeIds);
-
-        if (!courseErr && courseData && courseData.length > 0) {
-          // Fetch cutoffs
-          const courseIds = courseData.map((cd: { course_id: number }) => cd.course_id);
-          const cutoffsMap: Record<number, CollegeCutoff[]> = {};
-
-          if (courseIds.length > 0) {
-            try {
-              const { data: cutoffData, error: cutErr } = await supabase
-                .from("college_cutoffs")
-                .select("*")
-                .in("course_id", courseIds);
-
-              if (!cutErr && cutoffData) {
-                cutoffData.forEach((ct: {
-                  id?: string;
-                  course_id: number;
-                  college_id?: string;
-                  exam: string;
-                  cutoff_open?: number | null;
-                  cutoff_obc?: number | null;
-                  cutoff_sc?: number | null;
-                  cutoff_st?: number | null;
-                  quota?: string;
-                  year?: number;
-                  cutoff_unit?: string | null;
-                  round?: string | null;
-                  cutoff_type?: string | null;
-                  source_name?: string | null;
-                  source_url?: string | null;
-                  verification_status?: string | null;
-                  notes?: string | null;
-                }) => {
-                  if (!cutoffsMap[ct.course_id]) cutoffsMap[ct.course_id] = [];
-                  const colRow = collegeRows.find((c) => c.id === ct.college_id);
-                  const cName = (colRow?.name || "").toLowerCase();
-                  let verStatus: VerificationStatus = (ct.verification_status as VerificationStatus) || "DERIVED";
-                  if ((cName.includes("army institute of technology") || cName.includes("ait")) && ct.exam === "MHT CET") {
-                    verStatus = "INVALID";
-                  } else if (cName.includes("symbiosis law") && ct.exam === "MH CET Law") {
-                    verStatus = "INVALID";
-                  } else if (cName.includes("bharati vidyapeeth new law") && ct.exam === "MH CET Law") {
-                    verStatus = "INVALID";
-                  }
-                  const unitVal: CutoffUnit = (ct.cutoff_unit as CutoffUnit) || (ct.exam === "NATA" ? "marks" : ct.exam === "MH CET Law" ? "score" : "percentile");
-
-                  cutoffsMap[ct.course_id].push({
-                    id: ct.id,
-                    course_id: ct.course_id,
-                    college_id: ct.college_id,
-                    exam: ct.exam,
-                    open: ct.cutoff_open !== undefined ? ct.cutoff_open : null,
-                    obc: ct.cutoff_obc !== undefined ? ct.cutoff_obc : null,
-                    sc: ct.cutoff_sc !== undefined ? ct.cutoff_sc : null,
-                    st: ct.cutoff_st !== undefined ? ct.cutoff_st : null,
-                    quota: ct.quota,
-                    year: ct.year || undefined,
-                    cutoff_unit: unitVal,
-                    round: ct.round || undefined,
-                    cutoff_type: ct.cutoff_type || "closing_merit",
-                    source_name: ct.source_name || "State Common Entrance Test Cell, Maharashtra",
-                    source_url: ct.source_url || "https://cetcell.mahacet.org",
-                    verification_status: verStatus,
-                    notes: ct.notes || (verStatus === "INVALID" ? "INVALID: Exam misattribution identified in data verification audit." : undefined),
-                  });
-                });
-              }
-            } catch {
-              // Ignore cutoff fetch errors
-            }
-          }
-
-          courseData.forEach((cd: {
-            id?: string;
-            course_id: number;
-            college_id: string;
-            source_college_id?: number;
-            stream: string;
-            course_name: string;
-            intake: number;
-            program_url?: string | null;
-            jee_cutoff?: string | null;
-            accepted_exams?: string[] | null;
-            admission_route?: string | null;
-            eligibility_criteria?: string | null;
-            admission_source_name?: string | null;
-            admission_source_url?: string | null;
-            admission_verification_status?: string | null;
-          }) => {
-            if (!coursesMap[cd.college_id]) coursesMap[cd.college_id] = [];
-            coursesMap[cd.college_id].push({
-              id: cd.id,
-              course_id: cd.course_id,
-              college_id: cd.college_id,
-              source_college_id: cd.source_college_id,
-              stream: cd.stream,
-              course_name: cd.course_name,
-              intake: cd.intake,
-              program_url: cd.program_url || null,
-              jee_cutoff: cd.jee_cutoff || null,
-              accepted_exams: cd.accepted_exams && cd.accepted_exams.length > 0 ? cd.accepted_exams : undefined,
-              admission_route: cd.admission_route || undefined,
-              eligibility_criteria: cd.eligibility_criteria || undefined,
-              admission_source_name: cd.admission_source_name || undefined,
-              admission_source_url: cd.admission_source_url || undefined,
-              admission_verification_status: (cd.admission_verification_status as VerificationStatus) || undefined,
-              cutoffs: cutoffsMap[cd.course_id] || [],
-            });
-          });
-        }
-      } catch {
-        // Fallback to local dataset courses
-      }
-    }
-
-    // Also fetch normalized programs from public.college_programs if available
-    const programsMap: Record<string, string[]> = {};
-    if (collegeIds.length > 0) {
-      try {
-        const { data: progData, error: progErr } = await supabase
-          .from("college_programs")
-          .select("college_id, program_name")
-          .in("college_id", collegeIds);
-
-        if (!progErr && progData) {
-          progData.forEach((p: { college_id: string; program_name: string }) => {
-            if (!programsMap[p.college_id]) programsMap[p.college_id] = [];
-            programsMap[p.college_id].push(p.program_name);
-          });
-        }
-      } catch {
-        // Graceful fallback
-      }
-    }
-
-    // Map rows and enrich with offline dataset if courses/details aren't in Supabase yet
-    const datasetById = new Map<string, College>();
-    const datasetByName = new Map<string, College>();
-    for (const ec of EDUSPHERE_COLLEGES_DATASET) {
-      datasetById.set(ec.id, ec);
-      datasetByName.set(ec.name.toLowerCase().trim(), ec);
-    }
-
-    const mapped = collegeRows.map((item) => {
-      const dbCourses = coursesMap[item.id] || [];
-      const dbPrograms = programsMap[item.id] || [];
-      const col = mapDatabaseCollege(item, dbPrograms, dbCourses);
-
-      // Enrich from authoritative dataset
-      const enrichedFromDataset = datasetById.get(col.id) || datasetByName.get(col.name.toLowerCase().trim());
-      if (enrichedFromDataset) {
-        if (!col.primary_stream) col.primary_stream = enrichedFromDataset.primary_stream;
-        if (!col.naac_grade) col.naac_grade = enrichedFromDataset.naac_grade;
-        if (!col.official_website) col.official_website = enrichedFromDataset.official_website;
-        if (!col.accepted_exams || col.accepted_exams.length === 0) col.accepted_exams = enrichedFromDataset.accepted_exams;
-        if (!col.admission_route) col.admission_route = enrichedFromDataset.admission_route;
-        if (!col.eligibility_criteria) col.eligibility_criteria = enrichedFromDataset.eligibility_criteria;
-        if (!col.admission_source_name) col.admission_source_name = enrichedFromDataset.admission_source_name;
-        if (!col.admission_source_url) col.admission_source_url = enrichedFromDataset.admission_source_url;
-        if (!col.admission_verification_status) col.admission_verification_status = enrichedFromDataset.admission_verification_status;
-        if (!col.courses || col.courses.length === 0) {
-          col.courses = enrichedFromDataset.courses;
-          col.courses_count = enrichedFromDataset.courses_count;
-        } else {
-          // Enrich program_url, jee_cutoff, and verified admission details from dataset course if missing in DB
-          col.courses = col.courses.map((crs) => {
-            const matchedCrs = enrichedFromDataset.courses?.find((ec) => ec.course_id === crs.course_id);
-            if (!matchedCrs) return crs;
-            return {
-              ...crs,
-              program_url: crs.program_url || matchedCrs.program_url || enrichedFromDataset.official_website || null,
-              jee_cutoff: crs.jee_cutoff || matchedCrs.jee_cutoff || null,
-              accepted_exams: crs.accepted_exams || (matchedCrs.accepted_exams && matchedCrs.accepted_exams.length > 0 ? matchedCrs.accepted_exams : undefined),
-              admission_route: crs.admission_route || matchedCrs.admission_route || undefined,
-              eligibility_criteria: crs.eligibility_criteria || matchedCrs.eligibility_criteria || undefined,
-              admission_source_name: crs.admission_source_name || matchedCrs.admission_source_name || undefined,
-              admission_source_url: crs.admission_source_url || matchedCrs.admission_source_url || undefined,
-              admission_verification_status: crs.admission_verification_status || (matchedCrs.admission_verification_status as VerificationStatus) || undefined,
-            };
-          });
-        }
-        if (!col.programs || col.programs.length === 0) {
-          col.programs = enrichedFromDataset.programs;
-        }
-      }
-
-      return col;
-    });
-
-    // Merge any missing colleges from EDUSPHERE_COLLEGES_DATASET
-    const existingIds = new Set(mapped.map((c) => c.id));
-    const existingNames = new Set(mapped.map((c) => c.name.toLowerCase().trim()));
-
-    const merged: College[] = [...mapped];
-    for (const eduCol of EDUSPHERE_COLLEGES_DATASET) {
-      if (!existingIds.has(eduCol.id) && !existingNames.has(eduCol.name.toLowerCase().trim())) {
-        merged.push(eduCol);
-      }
-    }
-
-    merged.sort((a, b) => a.name.localeCompare(b.name));
-    return { data: merged, error: null };
-  } catch (err: unknown) {
-    console.warn("fetchColleges catch fallback:", err instanceof Error ? err.message : err);
-    return { data: EDUSPHERE_COLLEGES_DATASET, error: null };
-  }
+  const res = await getColleges({ isDemo: options?.isDemo }, supabase);
+  return { data: res.data, error: res.error };
 }
 
 /**
@@ -935,217 +727,7 @@ export async function fetchCollegeById(
   supabase: SupabaseClient,
   id: string
 ): Promise<{ data: College | null; error: string | null }> {
-  if (!id) return { data: null, error: "College ID is required" };
-
-  const dbUuid = itemIdToDbUuid(id);
-  const normalId = dbUuidToItemId(id);
-
-  try {
-    // 1. Fetch from Supabase public.colleges
-    const { data: rawCollege, error: colErr } = await supabase
-      .from("colleges")
-      .select("*")
-      .or(`id.eq.${dbUuid},id.eq.${id}`)
-      .maybeSingle();
-
-    if (colErr) {
-      console.warn("Error fetching college from Supabase, falling back to local dataset:", colErr.message);
-    }
-
-    const targetCollegeRow: DatabaseCollegeRow | null = rawCollege as DatabaseCollegeRow | null;
-
-    // Filter out demo colleges
-    if (targetCollegeRow?.name) {
-      const nameLower = targetCollegeRow.name.toLowerCase().trim();
-      if (
-        nameLower.startsWith("demo ") ||
-        nameLower.includes("demo college") ||
-        nameLower.includes("demo institute") ||
-        nameLower.includes("demo school") ||
-        targetCollegeRow.id === "00000000-0000-0000-0002-000000000002"
-      ) {
-        return { data: null, error: "College not found" };
-      }
-    }
-
-    // If found in Supabase, load courses and cutoffs
-    if (targetCollegeRow) {
-      const collegeId = targetCollegeRow.id;
-
-      // Query college_courses
-      const { data: courseData } = await supabase
-        .from("college_courses")
-        .select("*")
-        .eq("college_id", collegeId)
-        .order("course_id", { ascending: true });
-
-      const coursesList: CollegeCourse[] = [];
-
-      if (courseData && courseData.length > 0) {
-        const courseIds = courseData.map((c: { course_id: number }) => c.course_id);
-
-        // Query college_cutoffs
-        const cutoffsMap: Record<number, CollegeCutoff[]> = {};
-        if (courseIds.length > 0) {
-          const { data: cutoffData } = await supabase
-            .from("college_cutoffs")
-            .select("*")
-            .in("course_id", courseIds);
-
-          if (cutoffData) {
-            cutoffData.forEach((ct: {
-              id?: string;
-              course_id: number;
-              college_id?: string;
-              exam: string;
-              cutoff_open?: number | null;
-              cutoff_obc?: number | null;
-              cutoff_sc?: number | null;
-              cutoff_st?: number | null;
-              quota?: string;
-              year?: number;
-              cutoff_unit?: string | null;
-              round?: string | null;
-              cutoff_type?: string | null;
-              source_name?: string | null;
-              source_url?: string | null;
-              verification_status?: string | null;
-              notes?: string | null;
-            }) => {
-              if (!cutoffsMap[ct.course_id]) cutoffsMap[ct.course_id] = [];
-              const cName = (targetCollegeRow?.name || "").toLowerCase();
-              let verStatus: VerificationStatus = (ct.verification_status as VerificationStatus) || "DERIVED";
-              if ((cName.includes("army institute of technology") || cName.includes("ait")) && ct.exam === "MHT CET") {
-                verStatus = "INVALID";
-              } else if (cName.includes("symbiosis law") && ct.exam === "MH CET Law") {
-                verStatus = "INVALID";
-              } else if (cName.includes("bharati vidyapeeth new law") && ct.exam === "MH CET Law") {
-                verStatus = "INVALID";
-              }
-              const unitVal: CutoffUnit = (ct.cutoff_unit as CutoffUnit) || (ct.exam === "NATA" ? "marks" : ct.exam === "MH CET Law" ? "score" : "percentile");
-
-              cutoffsMap[ct.course_id].push({
-                id: ct.id,
-                course_id: ct.course_id,
-                college_id: ct.college_id,
-                exam: ct.exam,
-                open: ct.cutoff_open !== undefined ? ct.cutoff_open : null,
-                obc: ct.cutoff_obc !== undefined ? ct.cutoff_obc : null,
-                sc: ct.cutoff_sc !== undefined ? ct.cutoff_sc : null,
-                st: ct.cutoff_st !== undefined ? ct.cutoff_st : null,
-                quota: ct.quota,
-                year: ct.year || undefined,
-                cutoff_unit: unitVal,
-                round: ct.round || undefined,
-                cutoff_type: ct.cutoff_type || "closing_merit",
-                source_name: ct.source_name || "State Common Entrance Test Cell, Maharashtra",
-                source_url: ct.source_url || "https://cetcell.mahacet.org",
-                verification_status: verStatus,
-                notes: ct.notes || (verStatus === "INVALID" ? "INVALID: Exam misattribution identified in data verification audit." : undefined),
-              });
-            });
-          }
-        }
-
-        courseData.forEach((cd: {
-          id?: string;
-          course_id: number;
-          college_id: string;
-          source_college_id?: number;
-          stream: string;
-          course_name: string;
-          intake: number;
-          program_url?: string | null;
-          jee_cutoff?: string | null;
-          accepted_exams?: string[] | null;
-          admission_route?: string | null;
-          eligibility_criteria?: string | null;
-          admission_source_name?: string | null;
-          admission_source_url?: string | null;
-          admission_verification_status?: string | null;
-        }) => {
-          coursesList.push({
-            id: cd.id,
-            course_id: cd.course_id,
-            college_id: cd.college_id,
-            source_college_id: cd.source_college_id,
-            stream: cd.stream,
-            course_name: cd.course_name,
-            intake: cd.intake,
-            program_url: cd.program_url || targetCollegeRow?.official_website || null,
-            jee_cutoff: cd.jee_cutoff || null,
-            accepted_exams: cd.accepted_exams && cd.accepted_exams.length > 0 ? cd.accepted_exams : undefined,
-            admission_route: cd.admission_route || undefined,
-            eligibility_criteria: cd.eligibility_criteria || undefined,
-            admission_source_name: cd.admission_source_name || undefined,
-            admission_source_url: cd.admission_source_url || undefined,
-            admission_verification_status: (cd.admission_verification_status as VerificationStatus) || undefined,
-            cutoffs: cutoffsMap[cd.course_id] || [],
-          });
-        });
-      }
-
-      // Map row into College object
-      const mapped = mapDatabaseCollege(targetCollegeRow, [], coursesList);
-
-      // Enrich from dataset if courses or website are missing in Supabase
-      const matchedInDataset = EDUSPHERE_COLLEGES_DATASET.find(
-        (c) => c.id === mapped.id || c.id === collegeId || c.name.toLowerCase().trim() === mapped.name.toLowerCase().trim()
-      );
-
-      if (matchedInDataset) {
-        if (!mapped.primary_stream) mapped.primary_stream = matchedInDataset.primary_stream;
-        if (!mapped.naac_grade) mapped.naac_grade = matchedInDataset.naac_grade;
-        if (!mapped.official_website) mapped.official_website = matchedInDataset.official_website;
-        if (!mapped.provenance) mapped.provenance = matchedInDataset.provenance;
-        if (!mapped.accepted_exams || mapped.accepted_exams.length === 0) mapped.accepted_exams = matchedInDataset.accepted_exams;
-        if (!mapped.admission_route) mapped.admission_route = matchedInDataset.admission_route;
-        if (!mapped.eligibility_criteria) mapped.eligibility_criteria = matchedInDataset.eligibility_criteria;
-        if (!mapped.admission_source_name) mapped.admission_source_name = matchedInDataset.admission_source_name;
-        if (!mapped.admission_source_url) mapped.admission_source_url = matchedInDataset.admission_source_url;
-        if (!mapped.admission_verification_status) mapped.admission_verification_status = matchedInDataset.admission_verification_status;
-        if (!mapped.courses || mapped.courses.length === 0) {
-          mapped.courses = matchedInDataset.courses;
-          mapped.courses_count = matchedInDataset.courses_count;
-        } else {
-          mapped.courses = mapped.courses.map((crs) => {
-            const matchedCrs = matchedInDataset.courses?.find((ec) => ec.course_id === crs.course_id);
-            if (!matchedCrs) return crs;
-            return {
-              ...crs,
-              program_url: crs.program_url || matchedCrs.program_url || matchedInDataset.official_website || null,
-              jee_cutoff: crs.jee_cutoff || matchedCrs.jee_cutoff || null,
-              accepted_exams: crs.accepted_exams || (matchedCrs.accepted_exams && matchedCrs.accepted_exams.length > 0 ? matchedCrs.accepted_exams : undefined),
-              admission_route: crs.admission_route || matchedCrs.admission_route || undefined,
-              eligibility_criteria: crs.eligibility_criteria || matchedCrs.eligibility_criteria || undefined,
-              admission_source_name: crs.admission_source_name || matchedCrs.admission_source_name || undefined,
-              admission_source_url: crs.admission_source_url || matchedCrs.admission_source_url || undefined,
-              admission_verification_status: crs.admission_verification_status || (matchedCrs.admission_verification_status as VerificationStatus) || undefined,
-            };
-          });
-        }
-      }
-
-      return { data: mapped, error: null };
-    }
-
-    // 2. Fallback to authoritative local dataset
-    const fallbackCollege = EDUSPHERE_COLLEGES_DATASET.find(
-      (c) => c.id === id || c.id === dbUuid || c.id === normalId
-    );
-
-    if (fallbackCollege) {
-      return { data: fallbackCollege, error: null };
-    }
-
-    return { data: null, error: "College not found" };
-  } catch (err: unknown) {
-    console.warn("fetchCollegeById error fallback:", err instanceof Error ? err.message : err);
-    const fallbackCollege = EDUSPHERE_COLLEGES_DATASET.find(
-      (c) => c.id === id || c.id === dbUuid || c.id === normalId
-    );
-    return { data: fallbackCollege || null, error: null };
-  }
+  return getCollegeById(id, supabase);
 }
 
 export async function fetchCollegeSources(

@@ -175,8 +175,8 @@ export function PlacementCard({ placement }: { placement: Placement }) {
       <Modal
         isOpen={isDetailsOpen}
         onClose={() => setIsDetailsOpen(false)}
-        title={placement.role}
-        subtitle={`${placement.company} • ${placement.location || "Multiple Locations"}`}
+        title={placement.role || (placement.metric_name ? `NIRF ${placement.metric_name}` : "Placement Opportunity")}
+        subtitle={`${placement.company || "Institutional Record"} • ${placement.location || "Multiple Locations"}`}
       >
         <div className="space-y-6 text-sm text-slate-700">
           {/* Badges */}

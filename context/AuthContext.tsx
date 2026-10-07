@@ -15,6 +15,11 @@ interface UpdateProfileParams {
   preferredBranch?: string | null;
   preferredLocation?: string | null;
   careerGoal?: string | null;
+  preferredField?: string | null;
+  preferredDegreeLevel?: string | null;
+  preferredDegree?: string | null;
+  preferredDistrict?: string | null;
+  preferredUniversity?: string | null;
   skills?: string[];
 }
 
@@ -536,6 +541,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           preferred_location: trimmedLocation,
           cgpa: parsedCgpa,
           career_goal: trimmedCareerGoal,
+          preferred_field: data.preferredField ?? studentProfile?.preferred_field ?? null,
+          preferred_degree_level: data.preferredDegreeLevel ?? studentProfile?.preferred_degree_level ?? null,
+          preferred_degree: data.preferredDegree ?? studentProfile?.preferred_degree ?? null,
+          preferred_district: data.preferredDistrict ?? studentProfile?.preferred_district ?? null,
+          preferred_university: data.preferredUniversity ?? studentProfile?.preferred_university ?? null,
           updated_at: new Date().toISOString(),
         };
         setProfile(demoProf);
@@ -549,10 +559,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // REAL SUPABASE DATABASE PERSISTENCE — SUPABASE IS THE PERMANENT SOURCE OF TRUTH
       // =========================================================================
 
-      // Step A: Sync full_name with Supabase Auth user_metadata
+      // Step A: Sync full_name & preferences with Supabase Auth user_metadata
       try {
         await supabase.auth.updateUser({
-          data: { full_name: trimmedName },
+          data: {
+            full_name: trimmedName,
+            preferred_field: data.preferredField || null,
+            preferred_degree_level: data.preferredDegreeLevel || null,
+            preferred_degree: data.preferredDegree || null,
+            preferred_district: data.preferredDistrict || null,
+            preferred_university: data.preferredUniversity || null,
+          },
         });
       } catch (authMetaErr) {
         console.warn("Supabase auth updateUser note:", authMetaErr);
@@ -668,6 +685,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         spDbId = newSPData.id;
         activeSP = newSPData as StudentProfile;
       }
+
+      activeSP = {
+        ...activeSP,
+        preferred_field: data.preferredField ?? studentProfile?.preferred_field ?? null,
+        preferred_degree_level: data.preferredDegreeLevel ?? studentProfile?.preferred_degree_level ?? null,
+        preferred_degree: data.preferredDegree ?? studentProfile?.preferred_degree ?? null,
+        preferred_district: data.preferredDistrict ?? studentProfile?.preferred_district ?? null,
+        preferred_university: data.preferredUniversity ?? studentProfile?.preferred_university ?? null,
+      };
 
       // Step D: Synchronize public.student_skills (student_profiles -> student_skills)
       // 1. Delete all existing skills for this student profile

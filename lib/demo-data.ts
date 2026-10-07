@@ -375,8 +375,8 @@ export function generateDemoRecommendations(
     items.push({
       id: item.id,
       item_type: "placement",
-      title: item.role,
-      subtitle: `${item.company} • ${item.industry || "Technology"} • ${item.location || "Multiple Locations"}`,
+      title: item.role || "Placement Opportunity",
+      subtitle: `${item.company || "Enterprise Recruiter"} • ${item.industry || "Technology"} • ${item.location || "Multiple Locations"}`,
       match_score: finalScore,
       match_reasons: reasons.length > 0 ? reasons : ["Full-time opportunity for graduate students"],
       placement: item,
