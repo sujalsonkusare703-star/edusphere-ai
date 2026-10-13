@@ -21,6 +21,12 @@ export interface StudentProfile {
   preferred_degree?: string | null;
   preferred_district?: string | null;
   preferred_university?: string | null;
+  // Profile-page fields stored in auth user_metadata (see lib/profile-store.ts)
+  degree_level_code?: string | null;
+  field_code?: string | null;
+  specialisation?: string | null;
+  college_name?: string | null;
+  college_district?: string | null;
   created_at?: string;
   updated_at?: string;
 }

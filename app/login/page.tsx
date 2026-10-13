@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { AlertCircle, ArrowRight, Eye, EyeOff, Sparkles } from "@/components/icons";
 import { Logo } from "@/components/Logo";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -17,7 +18,7 @@ export default function LoginPage() {
   const [infoMsg, setInfoMsg] = useState("");
   const router = useRouter();
   const supabase = createClient();
-  const { loginDemo, refreshProfile } = useAuth();
+  const { refreshProfile } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,8 +61,7 @@ export default function LoginPage() {
           }
         }
         const searchParams = new URLSearchParams(window.location.search);
-        const redirectUrl = searchParams.get("redirect") || "/dashboard";
-        router.push(redirectUrl);
+        router.push(safeRedirectPath(searchParams.get("redirect")));
       }
     } catch (err: unknown) {
       console.error("Sign in error:", err);
@@ -69,14 +69,6 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickDemo = async () => {
-    setLoading(true);
-    setEmail("student@edusphere.ai");
-    setPassword("password123");
-    await loginDemo("student@edusphere.ai", "Sujal Sonkusare");
-    router.push("/dashboard");
   };
 
   const handleResendConfirmation = async () => {
@@ -129,6 +121,7 @@ export default function LoginPage() {
             <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-rose-800 text-xs flex items-start gap-3">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-600" />
               <div className="flex-1">
+                <span className="font-medium">{errorMsg}</span>
                 {(errorMsg.includes("not yet confirmed") || errorMsg.includes("not been confirmed")) && (
                   <button
                     type="button"
@@ -177,6 +170,12 @@ export default function LoginPage() {
                 >
                   Password
                 </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-neutral-500 hover:text-neutral-900 hover:underline"
+                >
+                  Forgot password?
+                </Link>
               </div>
               <div className="relative">
                 <input
@@ -222,28 +221,6 @@ export default function LoginPage() {
               )}
             </button>
 
-            {process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === "true" && (
-              <>
-                <div className="relative my-4 flex items-center justify-center">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-neutral-200" />
-                  </div>
-                  <span className="relative bg-white px-3 text-[11px] font-medium text-neutral-400">
-                    OR
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleQuickDemo}
-                  disabled={loading}
-                  className="w-full py-2.5 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-medium text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Explore as Demo Student (1-Click)</span>
-                </button>
-              </>
-            )}
           </form>
 
           <div className="mt-6 pt-6 border-t border-neutral-100 text-center">

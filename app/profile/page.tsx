@@ -17,7 +17,7 @@ export default function ProfilePage() {
     <ProtectedRoute>
       <DashboardShell
         title="Student Profile"
-        subtitle="Manage your personal information, entrance scores, and skill competencies"
+        subtitle="Your course, college, scores and skills"
       >
         {/* Profile Strength Card */}
         <div className="bg-white border border-[#EAEAEA] rounded-2xl p-6 sm:p-8 text-slate-900 relative overflow-hidden shadow-sm">
@@ -33,7 +33,7 @@ export default function ProfilePage() {
                 {profile?.full_name ? `Hi, ${profile.full_name}` : "Complete Your Profile"}
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 max-w-xl leading-relaxed">
-                A completed profile enables the EduSphere AI engine to generate high-accuracy recommendations for college admissions, internships, and placement drives.
+                Keep your profile complete and up to date. It will be used for your college and course suggestions when they launch.
               </p>
             </div>
 
