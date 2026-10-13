@@ -78,19 +78,10 @@ function getCurrentTimeString() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export function AICareerAssistant({
-  profile,
-  studentProfile,
-  skills,
-  careerReport,
-  skillGap,
-  colleges = [],
-  internships = [],
-  placements = [],
-  isDemo = false,
-}: AICareerAssistantProps) {
-  const { user, getAccessToken, refreshSession } = useAuth();
-  const isDemoUser = isDemo || !!user?.id?.startsWith("demo-");
+// profile, studentProfile, skills and the opportunity lists stay in the props for the
+// existing callers, but the server now builds that context itself and ignores them.
+export function AICareerAssistant({ careerReport, skillGap }: AICareerAssistantProps) {
+  const { getAccessToken, refreshSession } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome-msg",
@@ -134,45 +125,26 @@ export function AICareerAssistant({
     setLoading(true);
 
     try {
-      // 1. Retrieve the current access token for authenticated users
-      let token: string | null = null;
-      if (!isDemoUser) {
-        const supabase = createClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (session?.access_token) {
-          token = session.access_token;
-        } else {
-          token = await getAccessToken();
-        }
-
-        if (!token) {
-          setErrorMsg("Please sign in to access the AI Career Assistant.");
-          setLoading(false);
-          return;
-        }
+      // 1. Retrieve the current access token (the API requires a signed-in session)
+      let token = await getAccessToken();
+      if (!token) {
+        setErrorMsg("Please sign in to access the AI Career Assistant.");
+        setLoading(false);
+        return;
       }
 
       // 2. Helper to execute the chat request
       const executeChatRequest = async (tokenToSend?: string | null) => {
+        // The server builds the profile and catalogue context itself; send only
+        // the recent conversation and the client-computed career summaries.
         const payload = {
-          messages: updatedMessages.map((m) => ({
+          messages: updatedMessages.slice(-10).map((m) => ({
             role: m.role,
             content: m.content,
           })),
-          isDemo: isDemoUser,
           context: {
-            profile,
-            studentProfile,
-            skills,
             careerReport,
             skillGap,
-            colleges,
-            internships,
-            placements,
-            isDemo: isDemoUser,
           },
         };
 
@@ -194,7 +166,7 @@ export function AICareerAssistant({
       let res = await executeChatRequest(token);
 
       // 4. If server rejected with 401 (expired/invalid session), attempt token refresh & single retry
-      if (res.status === 401 && !isDemoUser) {
+      if (res.status === 401) {
         console.warn("[AICareerAssistant] Received 401 from /api/ai/chat. Attempting token refresh and single retry...");
         const supabase = createClient();
         const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();

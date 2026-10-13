@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import {
   buildSanitizedContext,
   buildSystemInstruction,
@@ -9,29 +9,44 @@ import {
 } from "@/lib/ai-context";
 import { fetchColleges, fetchInternships, fetchPlacements } from "@/lib/supabase/opportunities";
 import { computeCollegeGuidance, computeInternshipGuidance, computePlacementGuidance } from "@/lib/ai-guidance";
+import { isDataLive } from "@/lib/feature-flags";
+import { comingSoonResponse } from "@/lib/coming-soon";
+import { rateLimit } from "@/lib/rate-limit";
+import { EMPTY_ACADEMIC_PROFILE, readAcademicProfile, readFullName, toStudentProfile } from "@/lib/profile-store";
 
-// Lightweight in-memory rate limiter: max 20 requests per minute per identifier
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
+// Request limits
+const MAX_BODY_BYTES = 64 * 1024;
+const MAX_MESSAGES = 10;
+const MAX_MESSAGE_CHARS = 2000;
+const RATE_LIMIT_PER_MINUTE = 20;
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+/**
+ * Keeps only user/assistant messages with string content (a client cannot inject
+ * a system prompt), trims each to MAX_MESSAGE_CHARS, keeps the last MAX_MESSAGES,
+ * and drops leading assistant turns so the conversation starts with the user.
+ */
+function sanitizeMessages(raw: unknown): ChatMessage[] {
+  if (!Array.isArray(raw)) return [];
+  const cleaned: ChatMessage[] = [];
+  for (const m of raw) {
+    if (!m || typeof m !== "object") continue;
+    const { role, content } = m as { role?: unknown; content?: unknown };
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") continue;
+    const text = content.trim().slice(0, MAX_MESSAGE_CHARS);
+    if (text) cleaned.push({ role, content: text });
+  }
+  const recent = cleaned.slice(-MAX_MESSAGES);
+  while (recent.length > 0 && recent[0].role !== "user") recent.shift();
+  return recent;
 }
-const rateLimitMap = new Map<string, RateLimitEntry>();
 
-function checkRateLimit(identifier: string, limit = 20, windowMs = 60000): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(identifier);
-
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(identifier, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-
-  if (entry.count >= limit) {
-    return false;
-  }
-
-  entry.count++;
-  return true;
+function publicSupabase(): SupabaseClient {
+  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, key!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 const STOP_WORDS = new Set([
@@ -742,186 +757,132 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Parse Body safely
-    let body: {
-      messages?: Array<{ role: "user" | "assistant"; content: string }>;
-      context?: StudentCareerContextParams;
-      isDemo?: boolean;
-    };
+    // 1. Authentication: a valid Supabase session is always required.
+    const authHeader = req.headers.get("authorization");
+    const rawToken = authHeader?.replace(/^Bearer\s+/i, "").trim();
+    const token = rawToken && rawToken !== "null" && rawToken !== "undefined" ? rawToken : null;
+    if (!token) {
+      return NextResponse.json(
+        { error: "Authentication required to access the AI Career Assistant." },
+        { status: 401 }
+      );
+    }
 
+    const supabase = publicSupabase();
+    const { data: userData, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !userData?.user) {
+      const isNetworkError =
+        authError?.status === 0 ||
+        authError?.name === "AuthRetryableFetchError" ||
+        authError?.message?.toLowerCase().includes("fetch failed");
+      if (isNetworkError) {
+        console.error("[AI Chat Auth Error] Supabase Auth connection failed:", authError?.message);
+        return NextResponse.json({ error: "Unable to verify your session right now. Please try again." }, { status: 503 });
+      }
+      return NextResponse.json({ error: "Invalid or expired session. Please sign in again." }, { status: 401 });
+    }
+    const user: User = userData.user;
+
+    // 2. While the dataset is offline, never touch college data or the AI provider.
+    if (!isDataLive()) return comingSoonResponse();
+
+    // 3. Bounded request body
+    const declaredLength = Number(req.headers.get("content-length") || 0);
+    if (declaredLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+    const rawBody = await req.text();
+    if (rawBody.length > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+
+    let body: { messages?: unknown; context?: Pick<StudentCareerContextParams, "careerReport" | "skillGap"> };
     try {
-      body = await req.json();
+      body = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
     }
 
-    const { messages = [], context, isDemo = false } = body;
+    const messages = sanitizeMessages(body.messages);
     const latestMessage = messages[messages.length - 1];
-
-    if (!latestMessage || !latestMessage.content?.trim()) {
+    if (!latestMessage || latestMessage.role !== "user") {
       return NextResponse.json({ error: "Message content cannot be empty" }, { status: 400 });
     }
 
-    // 3. Security & Authentication Check
-    const authHeader = req.headers.get("authorization");
-    let token = authHeader ? authHeader.replace(/^Bearer\s+/i, "").trim() : null;
-    if (token === "null" || token === "undefined" || !token) {
-      token = null;
+    // 4. Shared rate limit keyed on the user id (not on spoofable headers).
+    let limit;
+    try {
+      limit = await rateLimit(`ai-chat:${user.id}`, RATE_LIMIT_PER_MINUTE, 60);
+    } catch (limitErr) {
+      console.error("[AI Chat] Rate limit store error:", limitErr);
+      return NextResponse.json({ error: "The AI assistant is temporarily unavailable." }, { status: 503 });
     }
-
-    let authenticatedUserId: string | null = null;
-
-    if (!isDemo) {
-      if (!token) {
-        return NextResponse.json(
-          { error: "Authentication required to access the AI Career Assistant." },
-          { status: 401 }
-        );
-      }
-
-      const supabaseKey =
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        supabaseKey!,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-          },
-        }
-      );
-
-      const { data: userData, error: authError } = await supabase.auth.getUser(token);
-
-      if (authError) {
-        const isNetworkError =
-          authError.status === 0 ||
-          authError.name === "AuthRetryableFetchError" ||
-          authError.message?.toLowerCase().includes("fetch failed");
-
-        if (isNetworkError) {
-          console.error("[AI Chat Auth Error] Supabase Auth connection failed:", authError.message);
-          return NextResponse.json(
-            { error: "Unable to verify authentication session with Supabase. Please check server connectivity." },
-            { status: 503 }
-          );
-        }
-
-        console.warn("[AI Chat Auth Note] Invalid/expired token verification:", authError.status, authError.message);
-        return NextResponse.json(
-          { error: "Invalid or expired session. Please sign in again." },
-          { status: 401 }
-        );
-      }
-
-      if (!userData?.user) {
-        return NextResponse.json(
-          { error: "Invalid or expired session. Please sign in again." },
-          { status: 401 }
-        );
-      }
-
-      authenticatedUserId = userData.user.id;
+    if (!limit.configured) {
+      console.error("[AI Chat] No rate limit store configured (UPSTASH_REDIS_REST_URL/TOKEN); refusing AI calls.");
+      return NextResponse.json({ error: "The AI assistant is temporarily unavailable." }, { status: 503 });
     }
-
-    // 4. Rate Limiting Protection (per authenticated user or demo IP)
-    const rateLimitKey = authenticatedUserId || req.headers.get("x-forwarded-for") || "anon-client";
-    if (!checkRateLimit(rateLimitKey, 25, 60000)) {
+    if (!limit.allowed) {
       return NextResponse.json(
         { error: "Rate limit exceeded. Please wait a moment before sending another message." },
-        { status: 429 }
+        { status: 429, headers: { "Retry-After": String(limit.resetSeconds) } }
       );
     }
 
-    // 5. Build Sanitized AI Context & Master System Prompt
-    let resolvedColleges = context?.colleges || [];
-    let resolvedInternships = context?.internships || [];
-    let resolvedPlacements = context?.placements || [];
+    // 5. Context is built on the server: the profile comes from the verified user,
+    //    catalogue data from the database. Client-sent college lists are ignored.
+    const academic = readAcademicProfile(user) ?? EMPTY_ACADEMIC_PROFILE;
+    const studentProfile = toStudentProfile(academic, { id: user.id, profile_id: user.id });
+    const skills = academic.skills;
+    const profile = { id: user.id, full_name: readFullName(user), role: null };
 
-    if (resolvedColleges.length === 0 || resolvedInternships.length === 0 || resolvedPlacements.length === 0) {
-      try {
-        const serverSupabaseKey =
-          process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-        const serverSupabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          serverSupabaseKey!,
-          { auth: { persistSession: false, autoRefreshToken: false } }
-        );
-
-        if (resolvedColleges.length === 0) {
-          const { data: dbCols } = await fetchColleges(serverSupabase);
-          if (dbCols && dbCols.length > 0) {
-            resolvedColleges = computeCollegeGuidance(context?.studentProfile || null, dbCols, context?.skills || []);
-          }
-        }
-
-        if (resolvedInternships.length === 0) {
-          const { data: dbInts } = await fetchInternships(serverSupabase, { isDemo });
-          if (dbInts && dbInts.length > 0) {
-            resolvedInternships = computeInternshipGuidance(context?.studentProfile || null, context?.skills || [], dbInts);
-          }
-        }
-
-        if (resolvedPlacements.length === 0) {
-          const { data: dbPlcs } = await fetchPlacements(serverSupabase, { isDemo });
-          if (dbPlcs && dbPlcs.length > 0) {
-            resolvedPlacements = computePlacementGuidance(context?.studentProfile || null, context?.skills || [], dbPlcs);
-          }
-        }
-      } catch (colErr) {
-        console.warn("Non-blocking note: could not fetch server catalog:", colErr);
-      }
-    }
-
-    // Security check: If client supplied a student profile ID that does not match authenticated user, nullify it
-    let safeStudentProfile = context?.studentProfile || null;
-    if (authenticatedUserId && !isDemo && safeStudentProfile?.id && safeStudentProfile.id !== authenticatedUserId && !safeStudentProfile.id.startsWith("sp-demo")) {
-      safeStudentProfile = null;
+    let resolvedColleges: StudentCareerContextParams["colleges"] = [];
+    let resolvedInternships: StudentCareerContextParams["internships"] = [];
+    let resolvedPlacements: StudentCareerContextParams["placements"] = [];
+    try {
+      const [{ data: dbCols }, { data: dbInts }, { data: dbPlcs }] = await Promise.all([
+        fetchColleges(supabase),
+        fetchInternships(supabase),
+        fetchPlacements(supabase),
+      ]);
+      if (dbCols?.length) resolvedColleges = computeCollegeGuidance(studentProfile, dbCols, skills);
+      if (dbInts?.length) resolvedInternships = computeInternshipGuidance(studentProfile, skills, dbInts);
+      if (dbPlcs?.length) resolvedPlacements = computePlacementGuidance(studentProfile, skills, dbPlcs);
+    } catch (colErr) {
+      console.warn("Non-blocking note: could not fetch server catalog:", colErr);
     }
 
     const sanitizedContext = buildSanitizedContext({
-      profile: context?.profile || null,
-      studentProfile: safeStudentProfile,
-      skills: context?.skills || [],
-      careerReport: context?.careerReport || null,
-      skillGap: context?.skillGap || null,
+      profile,
+      studentProfile,
+      skills,
+      careerReport: body.context?.careerReport || null,
+      skillGap: body.context?.skillGap || null,
       colleges: resolvedColleges,
       internships: resolvedInternships,
       placements: resolvedPlacements,
-      isDemo,
+      isDemo: false,
     });
 
     const systemInstruction = buildSystemInstruction(sanitizedContext);
 
-    // 6. Invoke AI Provider if Configured (Gemini -> OpenAI -> Grounded Fallback)
+    // 6. Invoke AI provider if configured (Gemini -> OpenAI -> grounded fallback)
     const geminiKey = process.env.GEMINI_API_KEY?.trim();
     const openAiKey = process.env.OPENAI_API_KEY?.trim();
 
-    // Option A: Google Gemini
     if (geminiKey) {
       try {
         const geminiRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
             body: JSON.stringify({
-              system_instruction: {
-                parts: [{ text: systemInstruction }],
-              },
+              system_instruction: { parts: [{ text: systemInstruction }] },
               contents: messages.map((m) => ({
                 role: m.role === "user" ? "user" : "model",
                 parts: [{ text: m.content }],
               })),
-              generationConfig: {
-                temperature: 0.35,
-                maxOutputTokens: 1024,
-              },
+              generationConfig: { temperature: 0.35, maxOutputTokens: 1024 },
             }),
           }
         );
@@ -930,28 +891,20 @@ export async function POST(req: NextRequest) {
           const geminiData = await geminiRes.json();
           const candidateText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (candidateText) {
-            return NextResponse.json({
-              reply: candidateText,
-              provider: "gemini",
-              timestamp: new Date().toISOString(),
-            });
+            return NextResponse.json({ reply: candidateText, provider: "gemini", timestamp: new Date().toISOString() });
           }
         }
         console.warn("Gemini API call returned non-OK status:", geminiRes.status);
       } catch (geminiErr) {
-        console.warn("Gemini provider warning, falling back to grounded responder:", geminiErr);
+        console.warn("Gemini provider warning, falling back:", geminiErr);
       }
     }
 
-    // Option B: OpenAI
     if (openAiKey) {
       try {
         const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${openAiKey}`,
-          },
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
           body: JSON.stringify({
             model: "gpt-4o-mini",
             messages: [{ role: "system", content: systemInstruction }, ...messages],
@@ -964,22 +917,16 @@ export async function POST(req: NextRequest) {
           const openAiData = await openAiRes.json();
           const replyText = openAiData?.choices?.[0]?.message?.content;
           if (replyText) {
-            return NextResponse.json({
-              reply: replyText,
-              provider: "openai",
-              timestamp: new Date().toISOString(),
-            });
+            return NextResponse.json({ reply: replyText, provider: "openai", timestamp: new Date().toISOString() });
           }
         }
         console.warn("OpenAI API call returned non-OK status:", openAiRes.status);
       } catch (openAiErr) {
-        console.warn("OpenAI provider warning, falling back to grounded responder:", openAiErr);
+        console.warn("OpenAI provider warning, falling back:", openAiErr);
       }
     }
 
-    // Option C: Precision Grounded Intelligence Responder (when external API key is pending)
     const groundedReply = generateGroundedAssistantReply(latestMessage.content, sanitizedContext, messages);
-
     return NextResponse.json({
       reply: groundedReply,
       provider: "edusphere-grounded-engine",
