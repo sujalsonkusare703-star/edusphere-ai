@@ -4,7 +4,8 @@
  *
  * CRITICAL SECURITY INVARIANTS:
  * - Server-side only execution.
- * - Authenticated via Vercel CRON_SECRET or verified Supabase Admin role.
+ * - Authenticated via CRON_SECRET, EDUSPHERE_ADMIN_SECRET or a profiles.role='admin' user.
+ * - Returns 503 "Coming soon" while NEXT_PUBLIC_DATA_LIVE is off.
  * - Non-authenticated requests receive 401 Unauthorized.
  * - Student accounts receive 403 Forbidden.
  * - NEVER accepts arbitrary target URLs from client input.
@@ -13,55 +14,68 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminSupabaseClient, verifyAdminRequest } from "@/lib/services/college-updater/auth";
+import {
+  AdminConfigError,
+  createAdminSupabaseClient,
+  getBearerToken,
+  secretMatches,
+  verifyAdminRequest,
+} from "@/lib/services/college-updater/auth";
 import { runCollegeUpdateScheduler, SchedulerOptions } from "@/lib/services/college-updater/scheduler";
+import { isDataLive } from "@/lib/feature-flags";
+import { comingSoonResponse } from "@/lib/coming-soon";
+
+export const maxDuration = 60;
 
 /**
  * Validates request authorization for cron execution:
- * 1. Vercel Cron Authorization header (Bearer CRON_SECRET)
- * 2. Internal test secret header (x-edusphere-admin-key)
- * 3. Authenticated Supabase administrator Bearer token
+ * 1. Vercel Cron: `Authorization: Bearer <CRON_SECRET>`
+ * 2. Server-to-server: `x-edusphere-admin-key: <EDUSPHERE_ADMIN_SECRET>`
+ * 3. A signed-in user with profiles.role = 'admin'
+ * Secrets are compared in constant time; there is no fallback to other keys.
  */
 async function authenticateCronRequest(req: NextRequest): Promise<{
   authorized: boolean;
   status?: number;
   error?: string;
 }> {
-  // 1. Check for Vercel Cron Secret
-  const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-
-  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    console.error("[cron] CRON_SECRET is not set: scheduled Vercel cron calls will be rejected.");
+  }
+  if (secretMatches(getBearerToken(req), cronSecret)) {
     return { authorized: true };
   }
 
-  // 2. Check for internal admin test key
-  const internalKey = req.headers.get("x-edusphere-admin-key");
-  const serverSecret = process.env.EDUSPHERE_ADMIN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (internalKey && serverSecret && internalKey === serverSecret) {
+  if (secretMatches(req.headers.get("x-edusphere-admin-key"), process.env.EDUSPHERE_ADMIN_SECRET)) {
     return { authorized: true };
   }
 
-  // 3. Fallback to Supabase User Admin Token verification
   const adminAuth = await verifyAdminRequest(req);
   if (adminAuth.authorized) {
     return { authorized: true };
   }
 
-  // Preserve 403 status if token belongs to an authenticated student
-  if (adminAuth.user && adminAuth.errorResponse) {
-    return {
-      authorized: false,
-      status: adminAuth.errorResponse.status,
-      error: "Forbidden: Student accounts cannot trigger scheduler operations."
-    };
-  }
-
+  const status = adminAuth.errorResponse?.status ?? 401;
   return {
     authorized: false,
-    status: 401,
-    error: "Unauthorized: Valid CRON_SECRET or Administrator credentials required."
+    status,
+    error:
+      status === 403
+        ? "Forbidden: Student accounts cannot trigger scheduler operations."
+        : status === 503
+        ? "Scheduler is not available: server is not configured."
+        : "Unauthorized: Valid CRON_SECRET or Administrator credentials required.",
   };
+}
+
+function schedulerErrorResponse(err: unknown) {
+  if (err instanceof AdminConfigError) {
+    console.error("[cron]", err.message);
+    return NextResponse.json({ error: "Scheduler is not available: server is not configured." }, { status: 503 });
+  }
+  console.error("[cron] Scheduler execution failure:", (err as Error)?.message);
+  return NextResponse.json({ error: "Scheduler execution failure." }, { status: 500 });
 }
 
 export async function GET(req: NextRequest) {
@@ -69,6 +83,8 @@ export async function GET(req: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
+  // College data is frozen while the site is in Coming soon mode.
+  if (!isDataLive()) return comingSoonResponse();
 
   try {
     const { searchParams } = new URL(req.url);
@@ -91,10 +107,7 @@ export async function GET(req: NextRequest) {
       summary
     });
   } catch (err: unknown) {
-    return NextResponse.json(
-      { error: `Scheduler execution failure: ${(err as Error)?.message}` },
-      { status: 500 }
-    );
+    return schedulerErrorResponse(err);
   }
 }
 
@@ -103,6 +116,8 @@ export async function POST(req: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
+  // College data is frozen while the site is in Coming soon mode.
+  if (!isDataLive()) return comingSoonResponse();
 
   try {
     let body: { batchSize?: number; forceCheckAll?: boolean; sourceId?: string } = {};
@@ -131,9 +146,6 @@ export async function POST(req: NextRequest) {
       summary
     });
   } catch (err: unknown) {
-    return NextResponse.json(
-      { error: `Scheduler execution failure: ${(err as Error)?.message}` },
-      { status: 500 }
-    );
+    return schedulerErrorResponse(err);
   }
 }

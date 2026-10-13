@@ -1,41 +1,60 @@
 /**
  * EduSphere AI — Automated College Intelligence Update System
- * Admin Authorization & Role Verification (Phase 3 Step 4E)
+ * Admin Authorization & Role Verification
  *
- * CRITICAL SECURITY INVARIANTS:
- * - Admin authorization is strictly evaluated server-side using Supabase Auth app_metadata.role = "admin".
- * - Never rely on client-side localStorage flags, query params, or email matching alone.
- * - Non-authenticated users receive 401 Unauthorized.
- * - Authenticated students/non-admins receive 403 Forbidden.
+ * SECURITY INVARIANTS:
+ * - One admin check everywhere: `profiles.role = 'admin'`, read server-side with the
+ *   service role (the same column the database policies use; users cannot change it).
+ *   `user_metadata` is user-editable and is never trusted for roles.
+ * - Fail closed: if SUPABASE_SERVICE_ROLE_KEY is missing, admin routes return 503;
+ *   there is no fallback to the public key.
+ * - No shared-secret "admin user": every admin action is tied to a real user id.
+ *   Shared secrets (CRON_SECRET, EDUSPHERE_ADMIN_SECRET) are only accepted by the
+ *   cron route, compared in constant time.
  */
 
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server.js";
 import { createClient } from "@supabase/supabase-js";
 import type { User, SupabaseClient } from "@supabase/supabase-js";
 
-/**
- * Evaluates whether a given Supabase user has the verified administrative role.
- */
-export function isUserAdmin(user: User | null): boolean {
-  if (!user) return false;
-  // Supabase app_metadata is strictly protected and only modifiable by service role
-  const appRole = user.app_metadata?.role;
-  return appRole === "admin";
-}
+export class AdminConfigError extends Error {}
 
 /**
- * Creates a server-side Supabase client with service role key if present,
- * otherwise falling back to standard publishable key for development testing.
+ * Server-only Supabase client with the service role key. Throws AdminConfigError
+ * when the key (or URL) is not configured instead of silently downgrading.
  */
 export function createAdminSupabaseClient(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new AdminConfigError("SUPABASE_SERVICE_ROLE_KEY is not configured on the server.");
+  }
   return createClient(url, key, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
+    auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+/** Constant-time comparison of a provided secret against the configured one. */
+export function secretMatches(provided: string | null | undefined, expected: string | undefined): boolean {
+  if (!provided || !expected) return false;
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
+export function getBearerToken(req: Request): string | null {
+  const header = req.headers.get("authorization");
+  if (!header || !header.toLowerCase().startsWith("bearer ")) return null;
+  const token = header.slice(7).trim();
+  return token && token !== "null" && token !== "undefined" ? token : null;
+}
+
+/** True when the user's `profiles.role` is 'admin'. */
+export async function isProfileAdmin(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+  if (error) throw new Error(`Admin role lookup failed: ${error.message}`);
+  return data?.role === "admin";
 }
 
 export interface AdminAuthResult {
@@ -44,83 +63,40 @@ export interface AdminAuthResult {
   errorResponse?: NextResponse;
 }
 
+const deny = (status: number, error: string, user?: User): AdminAuthResult => ({
+  authorized: false,
+  user,
+  errorResponse: NextResponse.json({ error }, { status }),
+});
+
 /**
- * Verifies that an incoming Next.js Request carries a valid Bearer token
- * belonging to an authenticated user with app_metadata.role = "admin".
- *
- * For local development/testing without live service-role provisioning,
- * accepts an authorized test bypass header 'x-edusphere-admin-key' if matching
- * the server-side environment secret.
+ * Verifies that the request carries a valid Supabase session token whose user has
+ * `profiles.role = 'admin'`. 401 without a valid session, 403 for non-admins,
+ * 503 when the server is missing its service role key.
  */
 export async function verifyAdminRequest(req: Request): Promise<AdminAuthResult> {
-  // 1. Check Authorization Bearer Header
-  const authHeader = req.headers.get("authorization");
-  let token: string | null = null;
-  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
-    token = authHeader.slice(7).trim();
-  }
+  const token = getBearerToken(req);
+  if (!token) return deny(401, "Unauthorized: Missing authentication token");
 
-  // 2. Check for internal admin key (for automated tests or server-to-server cron)
-  const internalKey = req.headers.get("x-edusphere-admin-key");
-  const serverSecret = process.env.EDUSPHERE_ADMIN_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (internalKey && serverSecret && internalKey === serverSecret) {
-    const mockAdminUser = {
-      id: "admin-system-service",
-      app_metadata: { role: "admin" },
-      user_metadata: { role: "admin" },
-      aud: "authenticated",
-      created_at: new Date().toISOString()
-    } as unknown as User;
-    return { authorized: true, user: mockAdminUser };
-  }
-
-  if (!token || token === "null" || token === "undefined") {
-    return {
-      authorized: false,
-      errorResponse: NextResponse.json(
-        { error: "Unauthorized: Missing authentication token" },
-        { status: 401 }
-      )
-    };
-  }
-
-  // 3. Verify user with Supabase Auth
+  let supabase: SupabaseClient;
   try {
-    const supabase = createAdminSupabaseClient();
-    const { data, error } = await supabase.auth.getUser(token);
+    supabase = createAdminSupabaseClient();
+  } catch (err) {
+    console.error("[admin auth]", (err as Error).message);
+    return deny(503, "Admin tools are not available: server is not configured.");
+  }
 
-    if (error || !data?.user) {
-      return {
-        authorized: false,
-        errorResponse: NextResponse.json(
-          { error: "Unauthorized: Invalid or expired session token" },
-          { status: 401 }
-        )
-      };
-    }
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) return deny(401, "Unauthorized: Invalid or expired session token");
 
     const user = data.user;
-
-    // 4. Role Authorization Check: Must have app_metadata.role === 'admin'
-    if (!isUserAdmin(user)) {
-      return {
-        authorized: false,
-        user,
-        errorResponse: NextResponse.json(
-          { error: "Forbidden: Administrator role required. Student accounts cannot approve or apply changes." },
-          { status: 403 }
-        )
-      };
+    if (!(await isProfileAdmin(supabase, user.id))) {
+      return deny(403, "Forbidden: Administrator role required.", user);
     }
-
     return { authorized: true, user };
-  } catch (err: unknown) {
-    return {
-      authorized: false,
-      errorResponse: NextResponse.json(
-        { error: `Authentication verification error: ${(err as Error).message}` },
-        { status: 500 }
-      )
-    };
+  } catch (err) {
+    console.error("[admin auth] verification error:", (err as Error).message);
+    return deny(500, "Authentication verification failed.");
   }
 }

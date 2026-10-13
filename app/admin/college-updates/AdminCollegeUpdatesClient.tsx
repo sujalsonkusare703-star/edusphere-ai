@@ -47,7 +47,7 @@ export interface MonitoredSourceItem {
 }
 
 export default function AdminCollegeUpdatesPage() {
-  const { user, loading, getAccessToken } = useAuth();
+  const { user, profile, loading, getAccessToken } = useAuth();
   const router = useRouter();
 
   // State
@@ -90,8 +90,8 @@ export default function AdminCollegeUpdatesPage() {
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [schedulerRunning, setSchedulerRunning] = useState(false);
 
-  // Auth verification
-  const isAuthorized = user?.app_metadata?.role === "admin" || user?.user_metadata?.role === "admin";
+  // UI hint only: the API re-checks profiles.role server-side on every request.
+  const isAuthorized = profile?.role === "admin";
 
   // Helper to build headers with authenticated Supabase Bearer token
   const getAuthHeaders = useCallback(async (includeJson: boolean = false): Promise<Record<string, string>> => {

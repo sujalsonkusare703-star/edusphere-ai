@@ -415,17 +415,26 @@ export async function adminRejectEvent(
 }
 
 /**
- * Atomically approves and applies a staged change event to production tables.
+ * Event types the database function `apply_college_change_event` applies itself.
+ * For any other type that function only records a snapshot and marks the event
+ * APPLIED without changing data, so those types are refused here until the
+ * function supports them (see audit/CLEANUP_LOG.md, "Needs a human decision").
+ */
+const RPC_APPLIED_EVENT_TYPES = new Set<string>([
+  "ACCEPTED_EXAMS_UPDATE",
+  "ADMISSION_ROUTE_UPDATE",
+  "SOURCE_URL_REDIRECT",
+]);
+
+/**
+ * Approves and applies a staged change event in ONE database transaction by calling
+ * `apply_college_change_event` (SECURITY DEFINER, executable only by service_role).
+ * The function locks the event row, refuses events that are already APPLIED or not
+ * reviewable, applies the change, advances the source hash, writes the audit row and
+ * marks the event APPLIED — all or nothing. A double-click or two admins cannot apply
+ * the same event twice.
  *
- * Steps:
- * 1. Concurrency guard: Check that event is in PENDING_REVIEW or APPROVED, and not APPLIED.
- * 2. Validate unit, values, program match, and evidence.
- * 3. Capture BEFORE state.
- * 4. Apply mutation to live production tables (colleges, courses, cutoffs).
- * 5. Update source registry baseline hash (advancing last_content_hash).
- * 6. Write immutable audit log record to public.college_audit_log.
- * 7. Transition change event status to APPLIED.
- * 8. On failure: roll back any partial updates and transition to ERROR.
+ * `supabase` must be the service-role client; `adminId` must be the real admin's user id.
  */
 export async function adminApproveAndApplyEvent(
   supabase: SupabaseClient,
@@ -441,360 +450,90 @@ export async function adminApproveAndApplyEvent(
   appliedAt?: string;
   error?: string;
 }> {
-  try {
-    // 1. Fetch Event with lock / latest state
-    const { data: event, error: fetchErr } = await supabase
-      .from("college_data_change_events")
-      .select("*")
-      .eq("id", eventId)
-      .single();
+  // 1. Read-only pre-checks (the RPC re-checks status under a row lock).
+  const { data: event, error: fetchErr } = await supabase
+    .from("college_data_change_events")
+    .select("*")
+    .eq("id", eventId)
+    .maybeSingle();
 
-    if (fetchErr || !event) {
-      return { success: false, error: `Change event not found: ${eventId}` };
-    }
+  if (fetchErr) {
+    return { success: false, error: `Could not load change event: ${fetchErr.message}` };
+  }
+  if (!event) {
+    return { success: false, error: `Change event not found: ${eventId}` };
+  }
 
-    const ev = event as CollegeDataChangeEvent;
+  const ev = event as CollegeDataChangeEvent;
 
-    // Concurrency check
-    if (ev.status === "APPLIED") {
-      return {
-        success: false,
-        error: "Conflict: This change event has already been applied to production."
-      };
-    }
-
-    if (ev.status !== "PENDING_REVIEW" && ev.status !== "APPROVED") {
-      return {
-        success: false,
-        error: `Cannot apply event in status "${ev.status}". Must be PENDING_REVIEW or APPROVED.`
-      };
-    }
-
-    const prop = ev.proposed_value as Record<string, unknown>;
-    const cand = (prop.extracted_data as ExtractedAdmissionUpdate) || prop;
-
-    // 2. Pre-application Safety Validations
-    if (cand?.cutoffs && cand.cutoffs.length > 0) {
-      for (const cut of cand.cutoffs as CandidateCutoff[]) {
-        const valRes = validateCandidateCutoff(cut);
-        if (!valRes.valid) {
-          return {
-            success: false,
-            error: `Cutoff safety violation: ${valRes.errors.join("; ")}`
-          };
-        }
-      }
-    }
-
-    if (cand?.programs && (cand.programs as { status?: string; program_name?: string }[]).some((p) => p.status === "AMBIGUOUS")) {
-      return {
-        success: false,
-        error: "Blocked: Ambiguous program match present. Program must be resolved before approval."
-      };
-    }
-
-    if (cand?.cutoffs && (cand.cutoffs as CandidateCutoff[]).some((c) => c.status === "AMBIGUOUS" || (!c.course_id && !ev.course_id))) {
-      return {
-        success: false,
-        error: "Blocked: Ambiguous program match for cutoff. Must assign valid course_id before approval."
-      };
-    }
-
-    if (cand?.conflicts && (cand.conflicts as CandidateConflict[]).some((c) => c.severity === "HIGH") && !options.forceOverrideConflicts) {
-      return {
-        success: false,
-        error: "Blocked: Unresolved HIGH conflicts present. Admin must override explicitly with justification."
-      };
-    }
-
-    // 3. Capture BEFORE State & Execute Atomic Mutation
-    let beforeState: Record<string, unknown> = {};
-    let afterState: Record<string, unknown> = {};
-    const appliedAt = new Date().toISOString();
-
-    if (ev.event_type === "ACCEPTED_EXAMS_UPDATE") {
-      const candidateExams = (cand as ExtractedAdmissionUpdate)?.exams?.[0]?.accepted_exams || (prop.accepted_exams as string[]);
-      if (!candidateExams || candidateExams.length === 0) {
-        return { success: false, error: "Missing accepted exams in proposed payload" };
-      }
-
-      if (ev.course_id) {
-        const { data: crsBefore } = await supabase.from("college_courses").select("*").eq("course_id", ev.course_id).single();
-        beforeState = crsBefore || {};
-
-        const { data: crsAfter, error: crsErr } = await supabase
-          .from("college_courses")
-          .update({
-            accepted_exams: candidateExams,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("course_id", ev.course_id)
-          .select()
-          .single();
-
-        if (crsErr) throw new Error(`Failed updating program exams: ${crsErr.message}`);
-        afterState = crsAfter || {};
-      } else {
-        const { data: colBefore } = await supabase.from("colleges").select("*").eq("id", ev.college_id).single();
-        beforeState = colBefore || {};
-
-        const { data: colAfter, error: colErr } = await supabase
-          .from("colleges")
-          .update({
-            accepted_exams: candidateExams,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("id", ev.college_id)
-          .select()
-          .single();
-
-        if (colErr) throw new Error(`Failed updating college exams: ${colErr.message}`);
-        afterState = colAfter || {};
-      }
-    } else if (ev.event_type === "ADMISSION_ROUTE_UPDATE") {
-      const candidateRoute = (cand as ExtractedAdmissionUpdate)?.routes?.[0]?.admission_route || (prop.admission_route as string);
-      if (!candidateRoute) {
-        return { success: false, error: "Missing admission route in proposed payload" };
-      }
-
-      if (ev.course_id) {
-        const { data: crsBefore } = await supabase.from("college_courses").select("*").eq("course_id", ev.course_id).single();
-        beforeState = crsBefore || {};
-
-        const { data: crsAfter, error: crsErr } = await supabase
-          .from("college_courses")
-          .update({
-            admission_route: candidateRoute,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("course_id", ev.course_id)
-          .select()
-          .single();
-
-        if (crsErr) throw new Error(`Failed updating program route: ${crsErr.message}`);
-        afterState = crsAfter || {};
-      } else {
-        const { data: colBefore } = await supabase.from("colleges").select("*").eq("id", ev.college_id).single();
-        beforeState = colBefore || {};
-
-        const { data: colAfter, error: colErr } = await supabase
-          .from("colleges")
-          .update({
-            admission_route: candidateRoute,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("id", ev.college_id)
-          .select()
-          .single();
-
-        if (colErr) throw new Error(`Failed updating college route: ${colErr.message}`);
-        afterState = colAfter || {};
-      }
-    } else if (ev.event_type === "ELIGIBILITY_CRITERIA_UPDATE") {
-      const candidateElig = (cand as ExtractedAdmissionUpdate)?.eligibilities?.[0]?.eligibility_criteria || (prop.eligibility_criteria as string);
-      if (!candidateElig) {
-        return { success: false, error: "Missing eligibility criteria in proposed payload" };
-      }
-
-      if (ev.course_id) {
-        const { data: crsBefore } = await supabase.from("college_courses").select("*").eq("course_id", ev.course_id).single();
-        beforeState = crsBefore || {};
-
-        const { data: crsAfter, error: crsErr } = await supabase
-          .from("college_courses")
-          .update({
-            eligibility_criteria: candidateElig,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("course_id", ev.course_id)
-          .select()
-          .single();
-
-        if (crsErr) throw new Error(`Failed updating program eligibility: ${crsErr.message}`);
-        afterState = crsAfter || {};
-      } else {
-        const { data: colBefore } = await supabase.from("colleges").select("*").eq("id", ev.college_id).single();
-        beforeState = colBefore || {};
-
-        const { data: colAfter, error: colErr } = await supabase
-          .from("colleges")
-          .update({
-            eligibility_criteria: candidateElig,
-            admission_verification_status: "VERIFIED",
-            updated_at: appliedAt
-          })
-          .eq("id", ev.college_id)
-          .select()
-          .single();
-
-        if (colErr) throw new Error(`Failed updating college eligibility: ${colErr.message}`);
-        afterState = colAfter || {};
-      }
-    } else if (ev.event_type === "CUTOFF_DATA_RELEASE") {
-      const candidateCutoffs = (cand as ExtractedAdmissionUpdate)?.cutoffs || (prop.cutoffs as CandidateCutoff[]) || [];
-      if (candidateCutoffs.length === 0) {
-        return { success: false, error: "Missing cutoffs in proposed payload" };
-      }
-
-      const appliedCutoffs: Record<string, unknown>[] = [];
-      for (const cut of candidateCutoffs) {
-        const targetCourseId = cut.course_id || ev.course_id;
-        if (!targetCourseId) {
-          return { success: false, error: `Program course_id must be assigned for cutoff "${cut.program_name}" before approval` };
-        }
-
-        // Check if cutoff already exists for this exact course, exam, category, quota, year, round
-        let matchQuery = supabase
-          .from("college_cutoffs")
-          .select("*")
-          .eq("college_id", ev.college_id)
-          .eq("course_id", targetCourseId)
-          .eq("exam", cut.exam)
-          .eq("category", cut.category);
-
-        if (cut.year !== null) matchQuery = matchQuery.eq("year", cut.year);
-        if (cut.round !== null) matchQuery = matchQuery.eq("round", cut.round);
-
-        const { data: existingCut } = await matchQuery.limit(1);
-
-        if (existingCut && existingCut.length > 0) {
-          // UPDATE existing
-          beforeState = existingCut[0];
-          const updatePayload: Record<string, unknown> = {
-            cutoff_open: cut.value,
-            cutoff_unit: cut.unit,
-            verification_status: "VERIFIED",
-            source_url: cut.source_url,
-            updated_at: appliedAt
-          };
-          const { data: cutUpdated, error: cutUpErr } = await supabase
-            .from("college_cutoffs")
-            .update(updatePayload)
-            .eq("id", existingCut[0].id)
-            .select()
-            .single();
-
-          if (cutUpErr) throw new Error(`Failed updating cutoff: ${cutUpErr.message}`);
-          appliedCutoffs.push(cutUpdated);
-        } else {
-          // INSERT new
-          beforeState = { status: "NEW_CUTOFF_RECORD" };
-          const insertPayload = {
-            college_id: ev.college_id,
-            course_id: targetCourseId,
-            exam: cut.exam,
-            category: cut.category,
-            quota: cut.quota || null,
-            cutoff_open: cut.value,
-            cutoff_unit: cut.unit,
-            year: cut.year,
-            round: cut.round,
-            verification_status: "VERIFIED",
-            source_url: cut.source_url,
-            created_at: appliedAt,
-            updated_at: appliedAt
-          };
-
-          const { data: cutInserted, error: cutInsErr } = await supabase
-            .from("college_cutoffs")
-            .insert(insertPayload)
-            .select()
-            .single();
-
-          if (cutInsErr) throw new Error(`Failed inserting new cutoff: ${cutInsErr.message}`);
-          appliedCutoffs.push(cutInserted);
-        }
-      }
-      afterState = { appliedCutoffs };
-    } else if (ev.event_type === "SOURCE_URL_REDIRECT") {
-      const finalUrl = (prop.finalUrl as string) || ((cand as unknown as Record<string, unknown>)?.finalUrl as string);
-      const { data: srcBefore } = await supabase.from("college_source_registry").select("*").eq("id", ev.source_id).single();
-      beforeState = srcBefore || {};
-
-      const { data: srcAfter, error: srcErr } = await supabase
-        .from("college_source_registry")
-        .update({ source_url: finalUrl, updated_at: appliedAt })
-        .eq("id", ev.source_id)
-        .select()
-        .single();
-
-      if (srcErr) throw new Error(`Failed updating source URL redirect: ${srcErr.message}`);
-      afterState = srcAfter || {};
-    }
-
-    // 4. Advance Baseline Hash in Source Registry
-    const newBaselineHash = (prop.currentHash as string) || ((cand as unknown as Record<string, unknown>)?.currentHash as string);
-    if (newBaselineHash) {
-      await supabase
-        .from("college_source_registry")
-        .update({
-          last_content_hash: newBaselineHash,
-          last_changed_at: appliedAt,
-          updated_at: appliedAt
-        })
-        .eq("id", ev.source_id);
-    }
-
-    // 5. Write Immutable Record to college_audit_log
-    const auditRecord = {
-      event_id: eventId,
-      college_id: ev.college_id,
-      course_id: ev.course_id || null,
-      modified_by: adminId,
-      before_state: beforeState,
-      after_state: afterState,
-      change_type: ev.event_type,
-      notes: options.notes || null,
-      created_at: appliedAt
-    };
-
-    let auditId = "audit-" + Math.random().toString(36).substring(2, 9);
-    const { data: auditData } = await supabase
-      .from("college_audit_log")
-      .insert(auditRecord)
-      .select("id")
-      .single();
-
-    if (auditData?.id) {
-      auditId = auditData.id;
-    }
-
-    // 6. Transition Event Status to APPLIED
-    await supabase
-      .from("college_data_change_events")
-      .update({
-        status: "APPLIED",
-        reviewer_id: adminId,
-        reviewed_at: appliedAt,
-        applied_at: appliedAt,
-        updated_at: appliedAt
-      })
-      .eq("id", eventId);
-
-    return {
-      success: true,
-      auditId,
-      appliedAt
-    };
-  } catch (err: unknown) {
-    // Rollback handling: transition event to ERROR
-    await supabase
-      .from("college_data_change_events")
-      .update({
-        status: "ERROR",
-        rejection_reason: `Application failed: ${(err as Error).message}`,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", eventId);
-
+  if (ev.status === "APPLIED") {
+    return { success: false, error: "Conflict: This change event has already been applied to production." };
+  }
+  if (ev.status !== "PENDING_REVIEW" && ev.status !== "APPROVED") {
+    return { success: false, error: `Cannot apply event in status "${ev.status}". Must be PENDING_REVIEW or APPROVED.` };
+  }
+  if (!RPC_APPLIED_EVENT_TYPES.has(ev.event_type)) {
     return {
       success: false,
-      error: `Atomic application failed: ${(err as Error).message}`
+      error: `Blocked: "${ev.event_type}" events cannot be applied atomically yet. Leave the event pending.`,
     };
   }
+
+  const prop = (ev.proposed_value ?? {}) as Record<string, unknown>;
+  const cand = (prop.extracted_data as ExtractedAdmissionUpdate) || prop;
+
+  if (cand?.cutoffs && cand.cutoffs.length > 0) {
+    for (const cut of cand.cutoffs as CandidateCutoff[]) {
+      const valRes = validateCandidateCutoff(cut);
+      if (!valRes.valid) {
+        return { success: false, error: `Cutoff safety violation: ${valRes.errors.join("; ")}` };
+      }
+    }
+  }
+
+  if (cand?.programs && (cand.programs as { status?: string }[]).some((p) => p.status === "AMBIGUOUS")) {
+    return { success: false, error: "Blocked: Ambiguous program match present. Program must be resolved before approval." };
+  }
+
+  if (cand?.conflicts && (cand.conflicts as CandidateConflict[]).some((c) => c.severity === "HIGH") && !options.forceOverrideConflicts) {
+    return { success: false, error: "Blocked: Unresolved HIGH conflicts present. Admin must override explicitly with justification." };
+  }
+
+  if (ev.event_type === "ACCEPTED_EXAMS_UPDATE") {
+    const exams = (cand as ExtractedAdmissionUpdate)?.exams?.[0]?.accepted_exams;
+    if (!exams || exams.length === 0) return { success: false, error: "Missing accepted exams in proposed payload" };
+  } else if (ev.event_type === "ADMISSION_ROUTE_UPDATE") {
+    const route = (cand as ExtractedAdmissionUpdate)?.routes?.[0]?.admission_route;
+    if (!route) return { success: false, error: "Missing admission route in proposed payload" };
+  } else if (ev.event_type === "SOURCE_URL_REDIRECT") {
+    if (typeof prop.finalUrl !== "string" || !prop.finalUrl) {
+      return { success: false, error: "Missing final URL in proposed payload" };
+    }
+  }
+
+  // 2. Apply atomically.
+  const { data, error } = await supabase.rpc("apply_college_change_event", {
+    p_event_id: eventId,
+    p_admin_id: adminId,
+    p_notes: options.notes?.trim() || null,
+  });
+
+  if (error) {
+    const msg = error.message || "Unknown database error";
+    if (/already applied/i.test(msg)) {
+      return { success: false, error: "Conflict: This change event has already been applied to production." };
+    }
+    if (/not found/i.test(msg)) {
+      return { success: false, error: `Change event not found: ${eventId}` };
+    }
+    // The transaction rolled back: nothing was changed and the event keeps its status.
+    return { success: false, error: `Apply failed, no changes were made: ${msg}` };
+  }
+
+  const result = (data ?? {}) as { audit_id?: string };
+  return {
+    success: true,
+    auditId: result.audit_id,
+    appliedAt: new Date().toISOString(),
+  };
 }

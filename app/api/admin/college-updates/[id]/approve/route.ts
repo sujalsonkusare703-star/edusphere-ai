@@ -4,6 +4,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isDataLive } from "@/lib/feature-flags";
+import { comingSoonResponse } from "@/lib/coming-soon";
 import { verifyAdminRequest, createAdminSupabaseClient } from "@/lib/services/college-updater/auth";
 import { adminApproveAndApplyEvent } from "@/lib/services/college-updater/approval";
 
@@ -16,6 +18,7 @@ export async function POST(
   if (!auth.authorized) {
     return auth.errorResponse!;
   }
+  if (!isDataLive()) return comingSoonResponse();
 
   const { id } = await params;
   if (!id) {
