@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { LayoutDashboard, User, LogOut, Menu, X, Sparkles } from "@/components/icons";
 import { Logo } from "@/components/Logo";
+import { SoonBadge } from "@/components/SoonBadge";
 
 export function Navbar() {
   const { user, profile, signOut } = useAuth();
@@ -19,7 +20,7 @@ export function Navbar() {
         </Link>
 
         {/* Center: Desktop Navigation */}
-        <nav className="hidden md:flex items-center gap-7">
+        <nav className="hidden md:flex items-center gap-4 lg:gap-6">
           <Link
             href="/#features"
             className="text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
@@ -28,21 +29,24 @@ export function Navbar() {
           </Link>
           <Link
             href="/colleges"
-            className="text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
             Colleges
+            <SoonBadge />
           </Link>
           <Link
             href="/internships"
-            className="text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
             Internships
+            <SoonBadge />
           </Link>
           <Link
             href="/placements"
-            className="text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
+            className="inline-flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
             Placements
+            <SoonBadge />
           </Link>
           <Link
             href="/recommendations"
@@ -50,6 +54,7 @@ export function Navbar() {
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
             <span>AI Recommendations</span>
+            <SoonBadge />
           </Link>
         </nav>
 
@@ -122,23 +127,26 @@ export function Navbar() {
           <Link
             href="/colleges"
             onClick={() => setMobileMenuOpen(false)}
-            className="block px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             Colleges
+            <SoonBadge />
           </Link>
           <Link
             href="/internships"
             onClick={() => setMobileMenuOpen(false)}
-            className="block px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             Internships
+            <SoonBadge />
           </Link>
           <Link
             href="/placements"
             onClick={() => setMobileMenuOpen(false)}
-            className="block px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             Placements
+            <SoonBadge />
           </Link>
           <Link
             href="/recommendations"
@@ -147,6 +155,7 @@ export function Navbar() {
           >
             <Sparkles className="w-4 h-4 text-indigo-500" />
             AI Recommendations
+            <SoonBadge />
           </Link>
 
           <div className="pt-3 border-t border-neutral-100">

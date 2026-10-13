@@ -4,7 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 
 export const metadata: Metadata = {
   title: "EduSphere AI | Shape Your Future. AI Guides You Forward.",
-  description: "AI-powered student academic and career guidance platform. Discover colleges, internships, placement opportunities, and personalized recommendations.",
+  description: "AI-powered academic and career guidance for students in Maharashtra.",
   icons: {
     icon: [
       { url: "/brand/logo-icon.png?v=edusphere", type: "image/png", sizes: "256x256" },

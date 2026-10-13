@@ -16,6 +16,7 @@ import {
   LogOut,
 } from "@/components/icons";
 import { Logo } from "@/components/Logo";
+import { isDataLive } from "@/lib/feature-flags";
 
 interface NavItem {
   name: string;
@@ -23,26 +24,30 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
   isAi?: boolean;
+  /** Hidden behind NEXT_PUBLIC_DATA_LIVE: shows a "Coming soon" badge while off. */
+  needsData?: boolean;
 }
 
 export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
   const pathname = usePathname();
   const { user, profile, studentProfile, skills, savedItemIds, signOut } = useAuth();
+  const dataLive = isDataLive();
 
   const navItems: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Profile", href: "/profile", icon: User },
-    { name: "Colleges", href: "/colleges", icon: Building2 },
-    { name: "Internships", href: "/internships", icon: Briefcase },
-    { name: "Placements", href: "/placements", icon: Award },
-    { name: "AI Recommendations", href: "/recommendations", icon: Sparkles, badge: "AI", isAi: true },
+    { name: "Colleges", href: "/colleges", icon: Building2, needsData: true },
+    { name: "Internships", href: "/internships", icon: Briefcase, needsData: true },
+    { name: "Placements", href: "/placements", icon: Award, needsData: true },
+    { name: "AI Recommendations", href: "/recommendations", icon: Sparkles, badge: "AI", isAi: true, needsData: true },
     {
       name: "Saved Items",
       href: "/saved",
       icon: Bookmark,
       badge: savedItemIds.size > 0 ? savedItemIds.size.toString() : undefined,
+      needsData: true,
     },
-  ];
+  ].map((item) => (item.needsData && !dataLive ? { ...item, badge: "Soon" } : item));
 
   const completionPercentage = calculateProfileStrength(profile, studentProfile, skills);
 
