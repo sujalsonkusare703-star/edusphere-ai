@@ -1,9 +1,12 @@
 /**
  * Static degree catalogue for the profile page.
  *
- * GENERATED from audit/perplexity_brief/degree_master_list.csv (148 rows).
+ * GENERATED from audit/perplexity_brief/degree_master_list.csv (148 rows), plus 2 Forensic Science rows.
  * Columns: field_code, level_code, degree, full_name, typical_duration_years.
  * Profile dropdowns use only this list; they do not depend on database programme rows.
+ *
+ * Hand-edited after generation: Forensic Science is its own field (FORENSIC_SCIENCE),
+ * not part of Science or Law, and was removed from the B.Sc. (Science) description.
  */
 
 export type DegreeRow = readonly [
@@ -34,10 +37,12 @@ export const DEGREE_ROWS: readonly DegreeRow[] = [
   ["COMPUTER_APPLICATIONS", "PG", "M.Sc. Computer Science", "M.Sc. (Computer Science)", "2"],
   ["COMPUTER_APPLICATIONS", "PG", "M.Sc. IT", "M.Sc. (Information Technology)", "2"],
   ["COMPUTER_APPLICATIONS", "PG_DIPLOMA", "PGDCA", "PG Diploma in Computer Applications", "1"],
-  ["SCIENCE", "UG", "B.Sc.", "B.Sc. (Physics, Chemistry, Maths, Statistics, Electronics, Geology, Geography, Environmental Science, Forensic Science, Home Science, Biochemistry, etc.)", "3"],
+  ["SCIENCE", "UG", "B.Sc.", "B.Sc. (Physics, Chemistry, Maths, Statistics, Electronics, Geology, Geography, Environmental Science, Home Science, Biochemistry, etc.)", "3"],
   ["SCIENCE", "UG", "B.Sc. (Honours)", "B.Sc. Honours", "3-4"],
   ["SCIENCE", "PG", "M.Sc.", "Master of Science (all subjects)", "2"],
   ["SCIENCE", "INTEGRATED", "Integrated M.Sc.", "Integrated M.Sc.", "5"],
+  ["FORENSIC_SCIENCE", "UG", "B.Sc. Forensic Science", "B.Sc. Forensic Science (incl. Cyber Security and Digital Forensics)", "3"],
+  ["FORENSIC_SCIENCE", "PG", "M.Sc. Forensic Science", "M.Sc. Forensic Science", "2"],
   ["LIFE_SCIENCES", "UG", "B.Sc. Biotechnology", "B.Sc. Biotechnology", "3"],
   ["LIFE_SCIENCES", "UG", "B.Sc. Microbiology", "B.Sc. Microbiology", "3"],
   ["LIFE_SCIENCES", "UG", "B.Sc. Botany/Zoology", "B.Sc. Botany / Zoology / Life Sciences", "3"],
@@ -191,6 +196,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   EDUCATION: "Education",
   ENGINEERING: "Engineering and Technology",
   FINE_PERFORMING_ARTS: "Fine and Performing Arts",
+  FORENSIC_SCIENCE: "Forensic Science",
   HOSPITALITY: "Hospitality and Tourism",
   LAW: "Law",
   LIBRARY_SCIENCE: "Library Science",
