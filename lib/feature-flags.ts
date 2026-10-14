@@ -9,3 +9,13 @@
 export function isDataLive(): boolean {
   return process.env.NEXT_PUBLIC_DATA_LIVE === "true";
 }
+
+/**
+ * The automated college updater (cron + admin review) reads and writes the old
+ * colleges / programs / stage_* tables, which are retired and must stay
+ * untouched. It is off regardless of NEXT_PUBLIC_DATA_LIVE until it is moved to
+ * the pune_* tables.
+ */
+export function isLegacyUpdaterEnabled(): boolean {
+  return false;
+}

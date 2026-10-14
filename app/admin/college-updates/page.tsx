@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
-import { isDataLive } from "@/lib/feature-flags";
 import { comingSoonMetadata } from "@/lib/coming-soon";
 import { ComingSoon } from "@/components/ComingSoon";
-import { AdminCollegeUpdatesLive } from "@/app/_live/pages";
 
-export const metadata: Metadata = isDataLive() ? {} : comingSoonMetadata("College update review");
+// The update reviewer edits the retired colleges/programs tables, so it stays
+// paused even when NEXT_PUBLIC_DATA_LIVE is on (see isLegacyUpdaterEnabled).
+export const metadata: Metadata = comingSoonMetadata("College update review");
 
 export default function Page() {
-  if (!isDataLive()) return <ComingSoon title="College update review" />;
-  return <AdminCollegeUpdatesLive />;
+  return (
+    <ComingSoon
+      title="College update review"
+      message="The college update tool is paused while EduSphere moves to the new Pune dataset."
+    />
+  );
 }

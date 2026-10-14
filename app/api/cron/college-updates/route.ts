@@ -22,7 +22,7 @@ import {
   verifyAdminRequest,
 } from "@/lib/services/college-updater/auth";
 import { runCollegeUpdateScheduler, SchedulerOptions } from "@/lib/services/college-updater/scheduler";
-import { isDataLive } from "@/lib/feature-flags";
+import { isLegacyUpdaterEnabled } from "@/lib/feature-flags";
 import { comingSoonResponse } from "@/lib/coming-soon";
 
 export const maxDuration = 60;
@@ -83,8 +83,8 @@ export async function GET(req: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
-  // College data is frozen while the site is in Coming soon mode.
-  if (!isDataLive()) return comingSoonResponse();
+  // The updater writes the retired colleges/programs tables, so it stays off.
+  if (!isLegacyUpdaterEnabled()) return comingSoonResponse();
 
   try {
     const { searchParams } = new URL(req.url);
@@ -116,8 +116,8 @@ export async function POST(req: NextRequest) {
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status || 401 });
   }
-  // College data is frozen while the site is in Coming soon mode.
-  if (!isDataLive()) return comingSoonResponse();
+  // The updater writes the retired colleges/programs tables, so it stays off.
+  if (!isLegacyUpdaterEnabled()) return comingSoonResponse();
 
   try {
     let body: { batchSize?: number; forceCheckAll?: boolean; sourceId?: string } = {};

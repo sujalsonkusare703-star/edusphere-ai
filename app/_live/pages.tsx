@@ -19,4 +19,3 @@ export const InternshipsLive = dynamic(() => import("../internships/InternshipsC
 export const PlacementsLive = dynamic(() => import("../placements/PlacementsClient"), { loading });
 export const SavedLive = dynamic(() => import("../saved/SavedClient"), { loading });
 export const DashboardLive = dynamic(() => import("../dashboard/DashboardClient"), { loading });
-export const AdminCollegeUpdatesLive = dynamic(() => import("../admin/college-updates/AdminCollegeUpdatesClient"), { loading });

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { isDataLive } from "@/lib/feature-flags";
+import { isLegacyUpdaterEnabled } from "@/lib/feature-flags";
 import { comingSoonResponse } from "@/lib/coming-soon";
 import { verifyAdminRequest, createAdminSupabaseClient } from "@/lib/services/college-updater/auth";
 import { runSourceMonitoringPipeline } from "@/lib/services/college-updater/scheduler";
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (!auth.authorized) {
     return auth.errorResponse!;
   }
-  if (!isDataLive()) return comingSoonResponse();
+  if (!isLegacyUpdaterEnabled()) return comingSoonResponse();
 
   try {
     const supabase = createAdminSupabaseClient();
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (!auth.authorized) {
     return auth.errorResponse!;
   }
-  if (!isDataLive()) return comingSoonResponse();
+  if (!isLegacyUpdaterEnabled()) return comingSoonResponse();
 
   try {
     const body = await req.json();
