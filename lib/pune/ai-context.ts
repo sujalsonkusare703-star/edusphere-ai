@@ -19,11 +19,14 @@ const STOP_WORDS = new Set(
     "program programs course courses show tell the there their these this to university versus vs what when where which " +
     "who with fees fee admission admissions cutoff cutoffs scholarship scholarships facilities facility accreditation " +
     "accreditations naac pune district available yet also all its than them they you your should would could best top good " +
-    "near details info information about eligible eligibility exam exams entrance match matches profile field"
+    "near details info information about eligible eligibility exam exams entrance match matches profile field " +
+    // Generic degree words: on their own they match every bachelor's / master's row.
+    "bachelor bachelors bachelor's master masters master's degree degrees"
   ).split(" ")
 );
 
 const MAX_COLLEGES = 3;
+const MAX_PROGRAMMES = 80;
 const MAX_CONTEXT_CHARS = 40_000;
 
 export interface AssistantContext {
@@ -56,6 +59,16 @@ function compact<T extends object>(row: T, omit: string[] = []): Record<string, 
   return out;
 }
 
+/** True when `word` appears in `text` at the start of a word (not inside one). */
+function startsWord(text: string, word: string): boolean {
+  let i = text.indexOf(word);
+  while (i !== -1) {
+    if (i === 0 || !/[\p{L}\p{N}]/u.test(text[i - 1])) return true;
+    i = text.indexOf(word, i + 1);
+  }
+  return false;
+}
+
 async function findColleges(supabase: SupabaseClient, words: string[]): Promise<PuneCollege[]> {
   if (words.length === 0) return [];
   const orFilter = words
@@ -69,13 +82,15 @@ async function findColleges(supabase: SupabaseClient, words: string[]): Promise<
     .range(0, 999);
   if (error) throw new Error(error.message);
   const lowerWords = words.map((w) => w.toLowerCase());
-  // Rank by how many question words appear in the name; require at least half of them.
-  const scored = ((data ?? []) as PuneCollege[])
-    .map((c) => {
-      const name = `${c.college_name_as_published} ${c.short_name ?? ""}`.toLowerCase();
-      return { c, score: lowerWords.filter((w) => name.includes(w)).length };
-    })
-    .filter((s) => s.score >= Math.max(1, Math.ceil(lowerWords.length / 2)))
+  // Score = how many question words start a word in the name ("mba" must not
+  // match "Mumbai"). Colleges containing every word win outright; otherwise at
+  // least half of the words must match.
+  const all = ((data ?? []) as PuneCollege[]).map((c) => {
+    const name = `${c.college_name_as_published} ${c.short_name ?? ""}`.toLowerCase();
+    return { c, score: lowerWords.filter((w) => startsWord(name, w)).length };
+  });
+  const complete = all.filter((s) => s.score === lowerWords.length);
+  const scored = (complete.length ? complete : all.filter((s) => s.score >= Math.max(1, Math.ceil(lowerWords.length / 2))))
     .sort((a, b) => b.score - a.score || a.c.college_name_as_published.length - b.c.college_name_as_published.length);
   // Same name listed twice (duplicate rows) adds nothing for the model.
   const seen = new Set<string>();
@@ -110,7 +125,7 @@ async function findProgrammes(supabase: SupabaseClient, words: string[]): Promis
     })
     .filter((s) => s.score >= Math.max(1, Math.ceil(lowerWords.length / 2)))
     .sort((a, b) => b.score - a.score || a.p.id - b.p.id)
-    .slice(0, 40)
+    .slice(0, MAX_PROGRAMMES)
     .map((s) => s.p);
 }
 
