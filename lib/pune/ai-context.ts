@@ -37,10 +37,13 @@ export interface AssistantContext {
   asksAboutProfile: boolean;
 }
 
+// Filler words are removed before the 6-word cap, so a long question keeps its
+// key terms (e.g. "B.Pharm" as the 7th word).
 function keywords(text: string): string[] {
-  return searchWords(text)
+  return searchWords(text, 50)
     .map((w) => w.replace(/^[.'\-/]+|[.'\-/]+$/g, ""))
-    .filter((w) => w.length >= 2 && !STOP_WORDS.has(w.toLowerCase()));
+    .filter((w) => w.length >= 2 && !STOP_WORDS.has(w.toLowerCase()))
+    .slice(0, 6);
 }
 
 /** Drops missing values so the model only sees what the database actually has. */

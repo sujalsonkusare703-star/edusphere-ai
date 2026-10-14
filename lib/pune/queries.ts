@@ -26,15 +26,15 @@ export interface Page<T> {
   total: number;
 }
 
-/** Splits search text into at most 6 safe words (letters, digits, . & ' + / -). */
-export function searchWords(input: string): string[] {
+/** Splits search text into at most `max` safe words (letters, digits, . & ' + / -). */
+export function searchWords(input: string, max = 6): string[] {
   return input
     .normalize("NFKC")
     .replace(/[^\p{L}\p{N}.&'+/\-\s]/gu, " ")
     .split(/\s+/)
     .map((w) => w.slice(0, 40))
     .filter((w) => w.length > 0)
-    .slice(0, 6);
+    .slice(0, max);
 }
 
 /** Escapes LIKE wildcards so a stored value is matched literally (case-insensitive). */
