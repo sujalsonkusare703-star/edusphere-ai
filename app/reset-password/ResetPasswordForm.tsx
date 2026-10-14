@@ -1,17 +1,47 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { AuthCard } from "@/components/AuthCard";
 import { AlertCircle, CheckCircle, Eye, EyeOff } from "@/components/icons";
 
-type LinkState = "checking" | "ready" | "invalid";
+type LinkState = "checking" | "confirm" | "ready" | "invalid";
+
+type LinkInfo =
+  | { kind: "pending" } // server render / before hydration
+  | { kind: "error" } // Supabase redirected here with an error (e.g. otp_expired)
+  | { kind: "token"; tokenHash: string } // ?token_hash=...&type=recovery
+  | { kind: "session" }; // older link style: the client exchanges the code itself
+
+// The URL never changes while this page is open (we only strip it after success,
+// when `verified` already decides the state), so there is nothing to subscribe to.
+const noSubscribe = () => () => {};
+const readLocation = () => window.location.search + window.location.hash;
+const serverLocation = () => null;
+
+function parseLink(location: string | null): LinkInfo {
+  if (location === null) return { kind: "pending" };
+  const query = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  if (query.get("error") || query.get("error_code") || hash.get("error") || hash.get("error_code")) {
+    return { kind: "error" };
+  }
+  const tokenHash = query.get("token_hash");
+  if (tokenHash && query.get("type") === "recovery") return { kind: "token", tokenHash };
+  return { kind: "session" };
+}
 
 export default function ResetPasswordForm() {
   const router = useRouter();
-  const [linkState, setLinkState] = useState<LinkState>("checking");
+  const link = parseLink(useSyncExternalStore(noSubscribe, readLocation, serverLocation));
+  // Outcome of the "Continue" step for token_hash links.
+  const [verified, setVerified] = useState(false);
+  const [verifyFailed, setVerifyFailed] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  // Outcome of waiting for a session for older (code / hash) links.
+  const [sessionState, setSessionState] = useState<"checking" | "ready" | "invalid">("checking");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -20,14 +50,28 @@ export default function ResetPasswordForm() {
   const [errorMsg, setErrorMsg] = useState("");
   const submittingRef = useRef(false);
 
-  // The Supabase client reads the recovery code from the URL and creates a
-  // short-lived session. Wait for it; if none appears, the link is invalid or expired.
+  const linkState: LinkState = verified
+    ? "ready"
+    : link.kind === "pending"
+      ? "checking"
+      : link.kind === "error"
+        ? "invalid"
+        : link.kind === "token"
+          ? verifyFailed
+            ? "invalid"
+            : "confirm"
+          : sessionState;
+
+  // Older links only: the Supabase client reads the recovery code from the URL and
+  // creates a short-lived session. Wait for it; if none appears, the link is invalid.
+  // token_hash links never take this path, so opening the page alone uses nothing up.
   useEffect(() => {
+    if (link.kind !== "session" || verified) return;
     const supabase = createClient();
     let settled = false;
     const markReady = () => {
       settled = true;
-      setLinkState("ready");
+      setSessionState("ready");
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -41,14 +85,35 @@ export default function ResetPasswordForm() {
     });
 
     const timer = setTimeout(() => {
-      if (!settled) setLinkState("invalid");
+      if (!settled) setSessionState("invalid");
     }, 6000);
 
     return () => {
       clearTimeout(timer);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [link.kind, verified]);
+
+  // Email scanners and link previews only load the page; the one-time token is
+  // spent here, when a person presses "Continue".
+  const handleContinue = async () => {
+    if (link.kind !== "token" || verifying) return;
+    setVerifying(true);
+    try {
+      const { error } = await createClient().auth.verifyOtp({ token_hash: link.tokenHash, type: "recovery" });
+      if (error) {
+        setVerifyFailed(true);
+        return;
+      }
+      setVerified(true);
+      // Keep the used token out of the address bar and browser history.
+      window.history.replaceState(null, "", window.location.pathname);
+    } catch {
+      setVerifyFailed(true);
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +164,21 @@ export default function ResetPasswordForm() {
           <span className="w-4 h-4 rounded-full border-2 border-neutral-200 border-t-neutral-600 animate-spin" />
           Checking your reset link…
         </p>
+      )}
+
+      {linkState === "confirm" && (
+        <div className="space-y-4">
+          <p className="text-sm text-neutral-600">Press Continue to confirm this reset link and choose your new password.</p>
+          <button
+            type="button"
+            onClick={handleContinue}
+            disabled={verifying}
+            className="w-full py-3 px-4 rounded-xl bg-neutral-900 hover:bg-neutral-800 disabled:opacity-50 text-white font-medium text-sm shadow-sm transition flex items-center justify-center gap-2"
+          >
+            {verifying && <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />}
+            {verifying ? "Checking…" : "Continue"}
+          </button>
+        </div>
       )}
 
       {linkState === "invalid" && (
