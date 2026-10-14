@@ -21,6 +21,8 @@ interface Feature {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   description: string;
+  /** In the Pune dataset: "Soon" only while NEXT_PUBLIC_DATA_LIVE is off. Otherwise always "Soon". */
+  inDataset: boolean;
 }
 
 const FEATURES: Feature[] = [
@@ -29,14 +31,16 @@ const FEATURES: Feature[] = [
     href: "/colleges",
     icon: Building2,
     description:
-      "Browse Maharashtra colleges and their programmes. Every detail is labelled with where it came from, and anything we could not confirm is shown as “Not available” instead of a guess.",
+      "Browse Pune district colleges and their programmes, fees and admissions. Every record shows where it came from, and anything we could not confirm is shown as “Not available” instead of a guess.",
+    inDataset: true,
   },
   {
     title: "AI Recommendations",
     href: "/recommendations",
     icon: Sparkles,
     description:
-      "Get college and course suggestions based on your field, degree, district and scores, with the reasons behind each suggestion shown next to it. No admission guarantees.",
+      "See programmes that match your field and level, and ask an AI assistant that answers only from the database. No admission guarantees.",
+    inDataset: true,
   },
   {
     title: "Internships",
@@ -44,6 +48,7 @@ const FEATURES: Feature[] = [
     icon: Briefcase,
     description:
       "Find internships that match the skills on your profile, with clear requirements and timelines.",
+    inDataset: false,
   },
   {
     title: "Placements",
@@ -51,6 +56,7 @@ const FEATURES: Feature[] = [
     icon: Award,
     description:
       "See placement records for each college, only where a source for the numbers exists.",
+    inDataset: false,
   },
 ];
 
@@ -61,7 +67,7 @@ const STEPS = [
   },
   {
     title: "Explore sourced data",
-    text: "Look through colleges and programmes, with the source and verification status shown for each record.",
+    text: "Look through colleges and programmes, with the source and retrieved date shown for each record.",
   },
   {
     title: "Get AI guidance",
@@ -159,7 +165,7 @@ export default function LandingPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {FEATURES.map(({ title, href, icon: Icon, description }) => (
+              {FEATURES.map(({ title, href, icon: Icon, description, inDataset }) => (
                 <Link
                   key={href}
                   href={href}
@@ -170,7 +176,7 @@ export default function LandingPage() {
                       <Icon className="w-5 h-5" />
                     </div>
                     <h3 className="text-lg font-bold text-neutral-950">{title}</h3>
-                    <SoonBadge />
+                    {!(inDataset && dataLive) && <SoonBadge />}
                   </div>
                   <p className="mt-3 text-sm text-neutral-600 leading-relaxed">{description}</p>
                 </Link>

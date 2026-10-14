@@ -6,8 +6,10 @@ import { useAuth } from "@/context/AuthContext";
 import { LayoutDashboard, User, LogOut, Menu, X, Sparkles } from "@/components/icons";
 import { Logo } from "@/components/Logo";
 import { SoonBadge } from "@/components/SoonBadge";
+import { isDataLive } from "@/lib/feature-flags";
 
 export function Navbar() {
+  const dataLive = isDataLive();
   const { user, profile, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -32,7 +34,7 @@ export function Navbar() {
             className="inline-flex items-center gap-1.5 text-[13px] font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
             Colleges
-            <SoonBadge />
+            {!dataLive && <SoonBadge />}
           </Link>
           <Link
             href="/internships"
@@ -54,7 +56,7 @@ export function Navbar() {
           >
             <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
             <span>AI Recommendations</span>
-            <SoonBadge />
+            {!dataLive && <SoonBadge />}
           </Link>
         </nav>
 
@@ -130,7 +132,7 @@ export function Navbar() {
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             Colleges
-            <SoonBadge />
+            {!dataLive && <SoonBadge />}
           </Link>
           <Link
             href="/internships"
@@ -155,7 +157,7 @@ export function Navbar() {
           >
             <Sparkles className="w-4 h-4 text-indigo-500" />
             AI Recommendations
-            <SoonBadge />
+            {!dataLive && <SoonBadge />}
           </Link>
 
           <div className="pt-3 border-t border-neutral-100">

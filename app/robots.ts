@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 import { isDataLive } from "@/lib/feature-flags";
 import { getSiteUrl } from "@/lib/site-url";
 
-const PRIVATE_PATHS = ["/api/", "/admin/", "/dashboard", "/profile", "/saved"];
-const DATA_PATHS = ["/colleges", "/recommendations", "/internships", "/placements"];
+const PRIVATE_PATHS = ["/api/", "/admin/", "/dashboard", "/profile", "/saved", "/internships", "/placements"];
+const DATA_PATHS = ["/colleges", "/programmes", "/compare", "/recommendations"];
 
 export default function robots(): MetadataRoute.Robots {
   const siteUrl = getSiteUrl();

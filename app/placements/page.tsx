@@ -1,19 +1,10 @@
 import type { Metadata } from "next";
-import { isDataLive } from "@/lib/feature-flags";
 import { comingSoonMetadata } from "@/lib/coming-soon";
 import { ComingSoon } from "@/components/ComingSoon";
-import { PlacementsLive } from "@/app/_live/pages";
 
-export const metadata: Metadata = isDataLive() ? {} : comingSoonMetadata("Placements");
+// Not in the Pune dataset: shown as coming soon whether or not NEXT_PUBLIC_DATA_LIVE is on.
+export const metadata: Metadata = comingSoonMetadata("Placements");
 
 export default function Page() {
-  if (!isDataLive()) {
-    return (
-      <ComingSoon
-        title="Placements"
-        message="We are collecting sourced placement records for Maharashtra colleges. This section is coming soon."
-      />
-    );
-  }
-  return <PlacementsLive />;
+  return <ComingSoon title="Placements" message="Placement records are not part of the EduSphere database yet. This section is coming soon." />;
 }

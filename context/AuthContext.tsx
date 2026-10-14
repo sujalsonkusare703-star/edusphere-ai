@@ -3,7 +3,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { isUuid, itemIdToDbUuid, dbUuidToItemId, normalizeAndDeduplicateSkills } from "@/lib/supabase/db-helpers";
+import { isUuid, normalizeAndDeduplicateSkills } from "@/lib/supabase/db-helpers";
+import { loadSavedIds, setSaved, type SavedKind } from "@/lib/pune/saved";
 import { Profile, StudentProfile } from "@/types";
 import { isDataLive } from "@/lib/feature-flags";
 import {
@@ -27,14 +28,18 @@ interface AuthContextType {
   profile: Profile | null;
   studentProfile: StudentProfile | null;
   skills: string[];
-  savedItemIds: Set<string>;
+  savedCollegeIds: Set<number>;
+  savedProgrammeIds: Set<number>;
   loading: boolean;
   getAccessToken: () => Promise<string | null>;
   refreshSession: () => Promise<Session | null>;
   refreshProfile: (explicitUser?: User | null) => Promise<void>;
   updateProfile: (data: UpdateProfileParams) => Promise<{ success: boolean; error?: string }>;
-  toggleSaveItem: (itemType: "college" | "internship" | "placement", itemId: string) => Promise<boolean>;
-  isItemSaved: (itemId: string) => boolean;
+  /**
+   * Saves or un-saves a college / programme (flips the current state, or sets
+   * `want` when given). Returns "login" when signed out.
+   */
+  toggleSaved: (kind: SavedKind, itemId: number, want?: boolean) => Promise<"saved" | "removed" | "login" | "error">;
   signOut: () => Promise<void>;
 }
 
@@ -82,7 +87,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [studentProfile, setStudentProfile] = useState<StudentProfile | null>(null);
   const [skills, setSkills] = useState<string[]>([]);
-  const [savedItemIds, setSavedItemIds] = useState<Set<string>>(new Set());
+  const [savedCollegeIds, setSavedCollegeIds] = useState<Set<number>>(new Set());
+  const [savedProgrammeIds, setSavedProgrammeIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const supabase = createClient();
@@ -97,7 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
     setStudentProfile(null);
     setSkills([]);
-    setSavedItemIds(new Set());
+    setSavedCollegeIds(new Set());
+    setSavedProgrammeIds(new Set());
   }, []);
 
   // Loads profile data for the signed-in user. Safe to call repeatedly; concurrent calls are de-duplicated.
@@ -173,15 +180,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
         }
 
-        // 3. Saved items belong to the data sections; skip the query while they are hidden.
-        let loadedSaved = new Set<string>();
-        if (isDataLive() && dbSP?.id && isUuid(dbSP.id as string)) {
-          const { data: dbSaved, error: savedErr } = await supabase
-            .from("saved_items")
-            .select("item_id, item_type")
-            .eq("student_profile_id", dbSP.id);
-          if (!savedErr && dbSaved) {
-            loadedSaved = new Set<string>(dbSaved.map((r) => dbUuidToItemId(r.item_id as string)));
+        // 3. Saved colleges / programmes (pune_saved_*) belong to the data sections;
+        //    skip the query while they are hidden.
+        let loadedSaved = { colleges: new Set<number>(), programmes: new Set<number>() };
+        if (isDataLive()) {
+          try {
+            loadedSaved = await loadSavedIds(supabase, currentUser.id);
+          } catch (savedErr) {
+            console.warn("Could not load saved items:", (savedErr as Error).message);
           }
         }
 
@@ -189,7 +195,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(activeProfile);
         setStudentProfile(toStudentProfile(academic, spBase));
         setSkills(academic.skills);
-        setSavedItemIds(loadedSaved);
+        setSavedCollegeIds(loadedSaved.colleges);
+        setSavedProgrammeIds(loadedSaved.programmes);
       } catch (err) {
         console.warn("Profile load error:", err);
       }
@@ -319,88 +326,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, studentProfile, supabase]);
 
-  const isItemSaved = useCallback((itemId: string) => {
-    if (!itemId) return false;
-    return (
-      savedItemIds.has(itemId) ||
-      savedItemIds.has(dbUuidToItemId(itemId)) ||
-      savedItemIds.has(itemIdToDbUuid(itemId))
-    );
-  }, [savedItemIds]);
+  const toggleSaved = useCallback(
+    async (kind: SavedKind, itemId: number, want?: boolean): Promise<"saved" | "removed" | "login" | "error"> => {
+      if (!user) return "login";
+      const current = kind === "college" ? savedCollegeIds : savedProgrammeIds;
+      const setIds = kind === "college" ? setSavedCollegeIds : setSavedProgrammeIds;
+      const wasSaved = want === undefined ? current.has(itemId) : !want;
 
-  const toggleSaveItem = useCallback(async (itemType: "college" | "internship" | "placement", itemId: string): Promise<boolean> => {
-    if (!user) {
-      router.push("/login");
-      return false;
-    }
-
-    const normId = dbUuidToItemId(itemId);
-    const dbUuid = itemIdToDbUuid(itemId);
-    const alreadySaved = savedItemIds.has(itemId) || savedItemIds.has(normId) || savedItemIds.has(dbUuid);
-    const prevSaved = new Set(savedItemIds);
-    const nextSet = new Set(savedItemIds);
-    if (alreadySaved) {
-      nextSet.delete(itemId);
-      nextSet.delete(normId);
-      nextSet.delete(dbUuid);
-    } else {
-      nextSet.add(normId);
-    }
-
-    // Optimistic UI update, rolled back below on failure.
-    setSavedItemIds(nextSet);
-
-    try {
-      let activeSpId = studentProfile?.id;
-      if (!activeSpId || !isUuid(activeSpId)) {
-        const { data: spData } = await supabase
-          .from("student_profiles")
-          .select("id")
-          .eq("profile_id", user.id)
-          .maybeSingle();
-        if (spData?.id) activeSpId = spData.id;
+      // Optimistic update, rolled back on failure.
+      setIds((prev) => {
+        const next = new Set(prev);
+        if (wasSaved) next.delete(itemId);
+        else next.add(itemId);
+        return next;
+      });
+      try {
+        await setSaved(supabase, user.id, kind, itemId, !wasSaved);
+        return wasSaved ? "removed" : "saved";
+      } catch (err) {
+        console.error("Saving failed:", (err as Error).message);
+        setIds((prev) => {
+          const next = new Set(prev);
+          if (wasSaved) next.add(itemId);
+          else next.delete(itemId);
+          return next;
+        });
+        return "error";
       }
-
-      if (!activeSpId || !isUuid(activeSpId)) {
-        throw new Error("Student profile ID not found for current user.");
-      }
-
-      if (alreadySaved) {
-        const { error: delErr } = await supabase
-          .from("saved_items")
-          .delete()
-          .eq("student_profile_id", activeSpId)
-          .eq("item_type", itemType)
-          .eq("item_id", dbUuid);
-        if (delErr) throw delErr;
-      } else {
-        const { data: existingRow, error: checkErr } = await supabase
-          .from("saved_items")
-          .select("id")
-          .eq("student_profile_id", activeSpId)
-          .eq("item_type", itemType)
-          .eq("item_id", dbUuid)
-          .maybeSingle();
-        if (checkErr) console.warn("Duplicate check query note:", checkErr.message);
-
-        if (!existingRow) {
-          const { error: insErr } = await supabase.from("saved_items").insert({
-            student_profile_id: activeSpId,
-            item_type: itemType,
-            item_id: dbUuid,
-            saved_at: new Date().toISOString(),
-          });
-          if (insErr && insErr.code !== "23505") throw insErr;
-        }
-      }
-
-      return !alreadySaved;
-    } catch (err) {
-      console.error("toggleSaveItem failed, rolling back optimistic update:", err);
-      setSavedItemIds(prevSaved);
-      return alreadySaved;
-    }
-  }, [user, studentProfile, savedItemIds, supabase, router]);
+    },
+    [user, savedCollegeIds, savedProgrammeIds, supabase]
+  );
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
     try {
@@ -466,14 +421,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         studentProfile,
         skills,
-        savedItemIds,
+        savedCollegeIds,
+        savedProgrammeIds,
         loading,
         getAccessToken,
         refreshSession,
         refreshProfile,
         updateProfile,
-        toggleSaveItem,
-        isItemSaved,
+        toggleSaved,
         signOut,
       }}
     >

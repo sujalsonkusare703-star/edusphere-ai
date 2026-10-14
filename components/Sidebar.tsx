@@ -13,6 +13,8 @@ import {
   Award,
   Sparkles,
   Bookmark,
+  BookOpen,
+  Compass,
   LogOut,
 } from "@/components/icons";
 import { Logo } from "@/components/Logo";
@@ -30,23 +32,27 @@ interface NavItem {
 
 export function Sidebar({ onCloseMobile }: { onCloseMobile?: () => void }) {
   const pathname = usePathname();
-  const { user, profile, studentProfile, skills, savedItemIds, signOut } = useAuth();
+  const { user, profile, studentProfile, skills, savedCollegeIds, savedProgrammeIds, signOut } = useAuth();
+  const savedCount = savedCollegeIds.size + savedProgrammeIds.size;
   const dataLive = isDataLive();
 
   const navItems: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Profile", href: "/profile", icon: User },
     { name: "Colleges", href: "/colleges", icon: Building2, needsData: true },
-    { name: "Internships", href: "/internships", icon: Briefcase, needsData: true },
-    { name: "Placements", href: "/placements", icon: Award, needsData: true },
+    { name: "Programmes", href: "/programmes", icon: BookOpen, needsData: true },
+    { name: "Compare", href: "/compare", icon: Compass, needsData: true },
     { name: "AI Recommendations", href: "/recommendations", icon: Sparkles, badge: "AI", isAi: true, needsData: true },
     {
       name: "Saved Items",
       href: "/saved",
       icon: Bookmark,
-      badge: savedItemIds.size > 0 ? savedItemIds.size.toString() : undefined,
+      badge: savedCount > 0 ? savedCount.toString() : undefined,
       needsData: true,
     },
+    // Not part of the Pune dataset yet: always marked "Soon".
+    { name: "Internships", href: "/internships", icon: Briefcase, badge: "Soon" },
+    { name: "Placements", href: "/placements", icon: Award, badge: "Soon" },
   ].map((item) => (item.needsData && !dataLive ? { ...item, badge: "Soon" } : item));
 
   const completionPercentage = calculateProfileStrength(profile, studentProfile, skills);

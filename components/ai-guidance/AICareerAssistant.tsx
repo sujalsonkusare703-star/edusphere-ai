@@ -4,13 +4,6 @@ import React, { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { createClient } from "@/lib/supabase/client";
 import {
-  Profile,
-  StudentProfile,
-  RecommendationItem,
-  SkillGapAnalysis,
-  CareerIntelligenceReport,
-} from "@/types";
-import {
   Send,
   Sparkles,
   Trash2,
@@ -29,48 +22,37 @@ interface Message {
   timestamp: string;
 }
 
-interface AICareerAssistantProps {
-  profile: Profile | null;
-  studentProfile: StudentProfile | null;
-  skills: string[];
-  careerReport?: CareerIntelligenceReport | null;
-  skillGap?: SkillGapAnalysis | null;
-  colleges?: RecommendationItem[];
-  internships?: RecommendationItem[];
-  placements?: RecommendationItem[];
-  isDemo?: boolean;
-}
-
+// Every starter question can be answered (or explicitly declined) from the pune_* tables.
 const STARTER_PROMPTS = [
   {
     icon: Building2,
-    title: "Targeting COEP",
-    prompt: "Can I target COEP Computer Engineering?",
-  },
-  {
-    icon: Compass,
-    title: "Compare Colleges",
-    prompt: "Compare COEP and PICT for my profile",
-  },
-  {
-    icon: Building2,
-    title: "Pune Colleges",
-    prompt: "Which Pune colleges have Computer Engineering?",
-  },
-  {
-    icon: Zap,
-    title: "Skill Priorities",
-    prompt: "What skills should I learn next?",
+    title: "Find colleges",
+    prompt: "Which colleges in the database offer B.Pharm?",
   },
   {
     icon: Award,
-    title: "Placement Eligibility",
-    prompt: "Why am I eligible for these placements?",
+    title: "Fees",
+    prompt: "What are the fees at ILS Law College?",
+  },
+  {
+    icon: Compass,
+    title: "Admissions",
+    prompt: "Which entrance exam is used for B.Sc. Nursing admissions?",
+  },
+  {
+    icon: Zap,
+    title: "Cutoffs",
+    prompt: "Which programmes have cutoff data in the database?",
   },
   {
     icon: Sparkles,
-    title: "Internship Match",
-    prompt: "Which internship matches my profile?",
+    title: "Scholarships",
+    prompt: "Which scholarships are listed for New Law College, Pune?",
+  },
+  {
+    icon: Building2,
+    title: "Programmes for my field",
+    prompt: "Which programmes match my profile field?",
   },
 ];
 
@@ -78,15 +60,14 @@ function getCurrentTimeString() {
   return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-// profile, studentProfile, skills and the opportunity lists stay in the props for the
-// existing callers, but the server now builds that context itself and ignores them.
-export function AICareerAssistant({ careerReport, skillGap }: AICareerAssistantProps) {
+// The server builds all context itself from the signed-in user and the pune_* tables.
+export function AICareerAssistant() {
   const { getAccessToken, refreshSession } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome-msg",
       role: "assistant",
-      content: "👋 Hello! I am your **EduSphere AI Career Guidance Assistant**.\n\nI have reviewed your academic profile, recorded skills, and current database opportunities. How can I assist your career progression today?\n\nSelect a starter question below or ask me anything regarding your cutoff eligibility, skill gaps, or career roadmaps.",
+      content: "👋 Hello! I am the **EduSphere AI assistant**.\n\nI answer only from the EduSphere database of Pune district colleges, programmes, fees, admissions, cutoffs, accreditations, facilities and scholarships. If something is not in the database, I will say so.\n\nPick a starter question below or ask your own.",
       timestamp: "Today",
     },
   ]);
@@ -135,17 +116,13 @@ export function AICareerAssistant({ careerReport, skillGap }: AICareerAssistantP
 
       // 2. Helper to execute the chat request
       const executeChatRequest = async (tokenToSend?: string | null) => {
-        // The server builds the profile and catalogue context itself; send only
-        // the recent conversation and the client-computed career summaries.
+        // The server builds the profile and database context itself; send only
+        // the recent conversation.
         const payload = {
           messages: updatedMessages.slice(-10).map((m) => ({
             role: m.role,
             content: m.content,
           })),
-          context: {
-            careerReport,
-            skillGap,
-          },
         };
 
         const headers: Record<string, string> = {
@@ -489,7 +466,7 @@ export function AICareerAssistant({ careerReport, skillGap }: AICareerAssistantP
               <span className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce" />
               <span className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:0.2s]" />
               <span className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:0.4s]" />
-              <span className="text-xs text-slate-500 font-medium ml-1">Analyzing career context...</span>
+              <span className="text-xs text-slate-500 font-medium ml-1">Searching the database...</span>
             </div>
           </div>
         )}
@@ -528,7 +505,7 @@ export function AICareerAssistant({ careerReport, skillGap }: AICareerAssistantP
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Ask about placement cutoffs, skill gaps, or interview readiness..."
+            placeholder="Ask about colleges, programmes, fees, admissions or cutoffs in the database..."
             disabled={loading}
             className="flex-1 bg-transparent border-0 resize-none text-xs sm:text-sm text-slate-900 placeholder:text-slate-400 focus:outline-hidden p-1.5 max-h-32 min-h-[2.5rem]"
           />
